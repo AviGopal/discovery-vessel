@@ -6,6 +6,7 @@
  */
 
 import type { VesselRegistration } from "./types"
+import { discoveryMetrics } from "./metrics"
 
 /** Default TTL for vessel registrations (5 minutes) */
 const DEFAULT_TTL_MS = 5 * 60 * 1000
@@ -35,14 +36,14 @@ export class VesselRegistry {
    * Register a vessel's capabilities
    */
   register(registration: Omit<VesselRegistration, "registeredAt" | "lastHeartbeat" | "status">): VesselRegistration {
-    const now = Date.now()
+    const startTime = Date.now()
     const existing = this.vessels.get(registration.vesselId)
 
     const record: VesselRegistration = {
       ...registration,
-      registeredAt: existing?.registeredAt ?? now,
-      lastHeartbeat: now,
-      expiresAt: now + DEFAULT_TTL_MS,
+      registeredAt: existing?.registeredAt ?? startTime,
+      lastHeartbeat: startTime,
+      expiresAt: startTime + DEFAULT_TTL_MS,
       status: "healthy"
     }
 
@@ -70,6 +71,11 @@ export class VesselRegistry {
       this.orgIndex.get(registration.orgId)!.add(registration.vesselId)
     }
 
+    // Record metrics
+    const duration = Date.now() - startTime
+    discoveryMetrics.recordRegistration(registration.vesselId, duration, true)
+    this.updateMetrics()
+
     return record
   }
 
@@ -78,7 +84,10 @@ export class VesselRegistry {
    */
   heartbeat(vesselId: string, metrics?: { executionsCompleted?: number; errorRate?: number; avgLatencyMs?: number }): boolean {
     const vessel = this.vessels.get(vesselId)
-    if (!vessel) return false
+    if (!vessel) {
+      discoveryMetrics.recordHeartbeat(vesselId, false)
+      return false
+    }
 
     const now = Date.now()
     vessel.lastHeartbeat = now
@@ -91,8 +100,14 @@ export class VesselRegistry {
         ...vessel.metadata,
         lastMetrics: metrics
       }
+
+      // Update heartbeat failure rate metric if error rate is provided
+      if (metrics.errorRate !== undefined) {
+        discoveryMetrics.updateHeartbeatFailureRate(vesselId, metrics.errorRate)
+      }
     }
 
+    discoveryMetrics.recordHeartbeat(vesselId, true)
     return true
   }
 
@@ -169,6 +184,11 @@ export class VesselRegistry {
 
     this.removeFromIndexes(vessel)
     this.vessels.delete(vesselId)
+
+    // Record deregistration metric
+    discoveryMetrics.recordDeregistration(vesselId, 'manual')
+    this.updateMetrics()
+
     return true
   }
 
@@ -202,7 +222,14 @@ export class VesselRegistry {
         this.removeFromIndexes(vessel)
         this.vessels.delete(vesselId)
         pruned.push(vesselId)
+
+        // Record expiration metric
+        discoveryMetrics.recordDeregistration(vesselId, 'expired')
       }
+    }
+
+    if (pruned.length > 0) {
+      this.updateMetrics()
     }
 
     return pruned
@@ -246,6 +273,14 @@ export class VesselRegistry {
         }
       }
     }
+  }
+
+  /**
+   * Update registry metrics
+   */
+  private updateMetrics(): void {
+    const stats = this.getStats()
+    discoveryMetrics.updateRegistryStats(stats.totalVessels, stats.totalShapes)
   }
 }
 

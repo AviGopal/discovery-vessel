@@ -11,6 +11,7 @@ import { logger } from "hono/logger"
 
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
 import { resolve, getResolvableShapes } from "./resolvers"
+import { metricsRegistry } from "./metrics"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -164,6 +165,19 @@ export function createServer() {
   // Registry stats
   app.get("/registry/stats", (c) => {
     return c.json(registry.getStats())
+  })
+
+  // Prometheus metrics endpoint
+  app.get("/metrics", (c) => {
+    const metrics = metricsRegistry.export()
+    return c.text(metrics, 200, {
+      'Content-Type': 'text/plain; version=0.0.4'
+    })
+  })
+
+  // Metrics in JSON format (for debugging)
+  app.get("/metrics/json", (c) => {
+    return c.json(metricsRegistry.exportJSON())
   })
 
   return app

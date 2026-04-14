@@ -6,6 +6,7 @@
  */
 
 import { registry } from "./registry"
+import { discoveryMetrics } from "./metrics"
 import type {
   DiscoveryPointer,
   VesselCapabilityPointer,
@@ -165,21 +166,41 @@ export async function resolveVesselRegistry(
  * Routes pointer to appropriate resolver based on type
  */
 export async function resolve(pointer: DiscoveryPointer): Promise<ResolverResult> {
-  switch (pointer.type) {
-    case "vesselCapability":
-      return resolveVesselCapability(pointer)
+  const startTime = Date.now()
+  let success = true
 
-    case "vesselEndpoint":
-      return resolveVesselEndpoint(pointer)
+  try {
+    let result: ResolverResult
 
-    case "vesselHealth":
-      return resolveVesselHealth(pointer)
+    switch (pointer.type) {
+      case "vesselCapability":
+        result = await resolveVesselCapability(pointer)
+        break
 
-    case "vesselRegistry":
-      return resolveVesselRegistry(pointer)
+      case "vesselEndpoint":
+        result = await resolveVesselEndpoint(pointer)
+        break
 
-    default:
-      throw new Error(`Unknown discovery pointer type: ${(pointer as { type: string }).type}`)
+      case "vesselHealth":
+        result = await resolveVesselHealth(pointer)
+        break
+
+      case "vesselRegistry":
+        result = await resolveVesselRegistry(pointer)
+        break
+
+      default:
+        success = false
+        throw new Error(`Unknown discovery pointer type: ${(pointer as { type: string }).type}`)
+    }
+
+    return result
+  } catch (error) {
+    success = false
+    throw error
+  } finally {
+    const duration = Date.now() - startTime
+    discoveryMetrics.recordResolution(pointer.type, duration, success)
   }
 }
 
