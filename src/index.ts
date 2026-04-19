@@ -91,7 +91,14 @@ export function createServer() {
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | undefined,
         orgId: request.orgId,
         metadata: request.metadata,
-        codebase: request.codebase
+        codebase: request.codebase,
+        // Phase 1: Explicit typed properties
+        stateful: request.stateful,
+        state: request.state,
+        resolvers: request.resolvers,
+        commitSha: request.commitSha,
+        discoveredVia: request.discoveredVia,
+        discoveredBy: request.discoveredBy
       })
 
       const response: RegisterResponse = {

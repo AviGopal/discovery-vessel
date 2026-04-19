@@ -49,6 +49,38 @@ export interface VesselRegistration {
   registeredAt: number
   lastHeartbeat: number
   expiresAt?: number
+
+  // Phase 1: Explicit typed properties
+  /** Whether the vessel maintains state */
+  stateful?: boolean
+
+  /** State tracking information */
+  state?: {
+    lastMigration?: string
+    schemaVersion?: string
+    recordCount?: number
+    healthMetrics?: {
+      errorRate?: number
+      avgLatencyMs?: number
+      lastBackup?: string
+    }
+  }
+
+  /** Resolver configurations */
+  resolvers?: Array<{
+    id: string
+    tier: string
+    operations?: string[]
+  }>
+
+  /** Git commit SHA for tracking deployments */
+  commitSha?: string
+
+  /** How the vessel was discovered */
+  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap"
+
+  /** ID of the vessel that discovered this one */
+  discoveredBy?: string
 }
 
 // =============================================================================
@@ -196,6 +228,38 @@ export interface RegisterRequest {
     accessLevel: "read-write" | "read-only" | "none"
     modifiableBy?: string
   }
+
+  // Phase 1: Explicit typed properties
+  /** Whether the vessel maintains state */
+  stateful?: boolean
+
+  /** State tracking information */
+  state?: {
+    lastMigration?: string
+    schemaVersion?: string
+    recordCount?: number
+    healthMetrics?: {
+      errorRate?: number
+      avgLatencyMs?: number
+      lastBackup?: string
+    }
+  }
+
+  /** Resolver configurations */
+  resolvers?: Array<{
+    id: string
+    tier: string
+    operations?: string[]
+  }>
+
+  /** Git commit SHA for tracking deployments */
+  commitSha?: string
+
+  /** How the vessel was discovered */
+  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap"
+
+  /** ID of the vessel that discovered this one */
+  discoveredBy?: string
 }
 
 export interface RegisterResponse {
