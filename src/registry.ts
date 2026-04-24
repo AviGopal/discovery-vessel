@@ -6,6 +6,11 @@
  */
 
 import type { VesselRegistration } from "./types"
+import {
+  DEFAULT_RESOLVE_ENDPOINT,
+  DEFAULT_RESOLVE_REQUEST_FORMAT,
+  DEFAULT_RESOLVE_AUTH_SCHEME
+} from "./types"
 import { discoveryMetrics } from "./metrics"
 
 /** Default TTL for vessel registrations (5 minutes) */
@@ -33,14 +38,47 @@ export class VesselRegistry {
   }
 
   /**
-   * Register a vessel's capabilities
+   * Register a vessel's capabilities.
+   *
+   * The resolve-contract fields (`resolve_endpoint`, `resolve_request_format`,
+   * `auth_scheme`, `resolve_timeout_ms`) are optional on input and get
+   * normalized to defaults at write time — the stored `VesselRegistration`
+   * always has them populated (except `resolve_timeout_ms`, which stays
+   * undefined when not advertised so the client can apply its own default).
    */
-  register(registration: Omit<VesselRegistration, "registeredAt" | "lastHeartbeat" | "status">): VesselRegistration {
+  register(
+    registration:
+      & Omit<
+          VesselRegistration,
+          | "registeredAt"
+          | "lastHeartbeat"
+          | "status"
+          | "resolve_endpoint"
+          | "resolve_request_format"
+          | "auth_scheme"
+          | "resolve_timeout_ms"
+        >
+      & Partial<
+          Pick<
+            VesselRegistration,
+            | "resolve_endpoint"
+            | "resolve_request_format"
+            | "auth_scheme"
+            | "resolve_timeout_ms"
+          >
+        >
+  ): VesselRegistration {
     const startTime = Date.now()
     const existing = this.vessels.get(registration.vesselId)
 
     const record: VesselRegistration = {
       ...registration,
+      // Normalize resolve contract at write time so every consumer sees a
+      // populated value regardless of whether the vessel advertised it.
+      resolve_endpoint: registration.resolve_endpoint ?? DEFAULT_RESOLVE_ENDPOINT,
+      resolve_request_format: registration.resolve_request_format ?? DEFAULT_RESOLVE_REQUEST_FORMAT,
+      auth_scheme: registration.auth_scheme ?? DEFAULT_RESOLVE_AUTH_SCHEME,
+      resolve_timeout_ms: registration.resolve_timeout_ms, // stays undefined when not advertised
       registeredAt: existing?.registeredAt ?? startTime,
       lastHeartbeat: startTime,
       expiresAt: startTime + DEFAULT_TTL_MS,

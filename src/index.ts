@@ -98,7 +98,13 @@ export function createServer() {
         resolvers: request.resolvers,
         commitSha: request.commitSha,
         discoveredVia: request.discoveredVia,
-        discoveredBy: request.discoveredBy
+        discoveredBy: request.discoveredBy,
+        // Wave 1A: resolve-contract self-description (all optional; registry
+        // normalizes omitted fields to defaults at write time).
+        resolve_endpoint: request.resolve_endpoint,
+        resolve_request_format: request.resolve_request_format,
+        auth_scheme: request.auth_scheme,
+        resolve_timeout_ms: request.resolve_timeout_ms
       })
 
       const response: RegisterResponse = {

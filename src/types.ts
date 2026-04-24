@@ -6,6 +6,33 @@
  */
 
 // =============================================================================
+// RESOLVE CONTRACT (Wave 1A)
+// =============================================================================
+
+/**
+ * How a vessel wants resolve requests encoded.
+ * - "pointer": body is `{pointer: {type, ...rest}}` (canonical impulse contract)
+ * - "mcp-tool": body is `{tool: "${pointer.type}_resolve", arguments: pointer}`
+ *   (used by MCP-style vessels like legacy concept-db).
+ */
+export type ResolveRequestFormat = "pointer" | "mcp-tool"
+
+/**
+ * Authentication scheme the vessel expects on resolve requests.
+ * - "none": no Authorization header
+ * - "ApiKey": `Authorization: ApiKey <key>`
+ * - "Bearer": `Authorization: Bearer <token>`
+ */
+export type ResolveAuthScheme = "none" | "ApiKey" | "Bearer"
+
+/** Default HTTP path for impulse resolution on a vessel. */
+export const DEFAULT_RESOLVE_ENDPOINT = "/v2/impulses/resolve"
+/** Default resolve request body encoding. */
+export const DEFAULT_RESOLVE_REQUEST_FORMAT: ResolveRequestFormat = "pointer"
+/** Default auth scheme (no auth). */
+export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none"
+
+// =============================================================================
 // VESSEL REGISTRATION
 // =============================================================================
 
@@ -26,6 +53,19 @@ export interface VesselRegistration {
 
   /** Organizational scope */
   orgId?: string
+
+  // --- Resolve contract (Wave 1A) -------------------------------------------
+  /** HTTP path appended to `endpoint` when resolving impulses. */
+  resolve_endpoint: string
+
+  /** Shape of the resolve request body (pointer vs mcp-tool). */
+  resolve_request_format: ResolveRequestFormat
+
+  /** Authentication scheme expected on resolve requests. */
+  auth_scheme: ResolveAuthScheme
+
+  /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
+  resolve_timeout_ms?: number
 
   /** Additional metadata */
   metadata?: {
@@ -141,16 +181,28 @@ export type DiscoveryPointer =
 // RESOLUTION RESULTS
 // =============================================================================
 
+export interface VesselCapability {
+  vesselId: string
+  vesselName: string
+  endpoint: string
+  protocol?: string
+  confidence: number
+  lastSeen: string
+
+  // --- Resolve contract (Wave 1A) -------------------------------------------
+  /** HTTP path appended to `endpoint` when resolving impulses. */
+  resolve_endpoint: string
+  /** Shape of the resolve request body (pointer vs mcp-tool). */
+  resolve_request_format: ResolveRequestFormat
+  /** Authentication scheme expected on resolve requests. */
+  auth_scheme: ResolveAuthScheme
+  /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
+  resolve_timeout_ms?: number
+}
+
 export interface VesselCapabilityResult {
   shape: string
-  vessels: Array<{
-    vesselId: string
-    vesselName: string
-    endpoint: string
-    protocol?: string
-    confidence: number
-    lastSeen: string
-  }>
+  vessels: VesselCapability[]
   found: boolean
 }
 
@@ -228,6 +280,18 @@ export interface RegisterRequest {
     accessLevel: "read-write" | "read-only" | "none"
     modifiableBy?: string
   }
+
+  // --- Resolve contract (Wave 1A, all optional) -----------------------------
+  /** HTTP path appended to `endpoint` when resolving impulses.
+   *  Default: "/v2/impulses/resolve" */
+  resolve_endpoint?: string
+  /** Shape of the resolve request body. Default: "pointer" */
+  resolve_request_format?: ResolveRequestFormat
+  /** Authentication scheme expected on resolve requests. Default: "none" */
+  auth_scheme?: ResolveAuthScheme
+  /** Vessel-declared max-time-to-respond on the resolve endpoint (ms).
+   *  Left unset by default; client applies its own default (typically 5000). */
+  resolve_timeout_ms?: number
 
   // Phase 1: Explicit typed properties
   /** Whether the vessel maintains state */

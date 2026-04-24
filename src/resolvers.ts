@@ -40,7 +40,12 @@ export async function resolveVesselCapability(
       endpoint: v.endpoint,
       protocol: v.protocol,
       confidence: 1.0,
-      lastSeen: new Date(v.lastHeartbeat).toISOString()
+      lastSeen: new Date(v.lastHeartbeat).toISOString(),
+      // Resolve contract (Wave 1A) — already normalized at registration time.
+      resolve_endpoint: v.resolve_endpoint,
+      resolve_request_format: v.resolve_request_format,
+      auth_scheme: v.auth_scheme,
+      resolve_timeout_ms: v.resolve_timeout_ms
     })),
     found: vessels.length > 0
   }
