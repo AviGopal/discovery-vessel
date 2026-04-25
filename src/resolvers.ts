@@ -45,7 +45,10 @@ export async function resolveVesselCapability(
       resolve_endpoint: v.resolve_endpoint,
       resolve_request_format: v.resolve_request_format,
       auth_scheme: v.auth_scheme,
-      resolve_timeout_ms: v.resolve_timeout_ms
+      resolve_timeout_ms: v.resolve_timeout_ms,
+      // Auth token source (Wave A3) — also normalized at registration time.
+      auth_token_source: v.auth_token_source,
+      auth_delegation_mode: v.auth_delegation_mode
     })),
     found: vessels.length > 0
   }

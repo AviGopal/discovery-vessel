@@ -12,7 +12,9 @@ import { VesselRegistry } from "../src/registry"
 import {
   DEFAULT_RESOLVE_ENDPOINT,
   DEFAULT_RESOLVE_REQUEST_FORMAT,
-  DEFAULT_RESOLVE_AUTH_SCHEME
+  DEFAULT_RESOLVE_AUTH_SCHEME,
+  DEFAULT_AUTH_TOKEN_SOURCE,
+  DEFAULT_AUTH_DELEGATION_MODE
 } from "../src/types"
 import { resolveVesselCapability } from "../src/resolvers"
 import { createServer, registry as globalRegistry } from "../src/index"
@@ -37,7 +39,7 @@ describe("Resolve Contract (Wave 1A)", () => {
   })
 
   describe("Registry normalization at write time", () => {
-    test("omitting all four fields applies defaults and leaves timeout undefined", () => {
+    test("omitting all six fields applies defaults and leaves timeout undefined", () => {
       const record = registry.register({
         vesselId: "vessel-defaults",
         vesselName: "Defaults Vessel",
@@ -53,9 +55,13 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(record.auth_scheme).toBe(DEFAULT_RESOLVE_AUTH_SCHEME)
       expect(record.auth_scheme).toBe("none")
       expect(record.resolve_timeout_ms).toBeUndefined()
+      expect(record.auth_token_source).toBe(DEFAULT_AUTH_TOKEN_SOURCE)
+      expect(record.auth_token_source).toBe("caller_identity")
+      expect(record.auth_delegation_mode).toBe(DEFAULT_AUTH_DELEGATION_MODE)
+      expect(record.auth_delegation_mode).toBe("forward")
     })
 
-    test("advertising all four fields round-trips them verbatim", () => {
+    test("advertising all six fields round-trips them verbatim", () => {
       const record = registry.register({
         vesselId: "vessel-full",
         vesselName: "Full Vessel",
@@ -65,13 +71,17 @@ describe("Resolve Contract (Wave 1A)", () => {
         resolve_endpoint: "/mcp/tools/call",
         resolve_request_format: "mcp-tool",
         auth_scheme: "Bearer",
-        resolve_timeout_ms: 12_000
+        resolve_timeout_ms: 12_000,
+        auth_token_source: "user_identity",
+        auth_delegation_mode: "mint"
       })
 
       expect(record.resolve_endpoint).toBe("/mcp/tools/call")
       expect(record.resolve_request_format).toBe("mcp-tool")
       expect(record.auth_scheme).toBe("Bearer")
       expect(record.resolve_timeout_ms).toBe(12_000)
+      expect(record.auth_token_source).toBe("user_identity")
+      expect(record.auth_delegation_mode).toBe("mint")
     })
 
     test("partial override: only auth_scheme set → other three get defaults", () => {
@@ -104,11 +114,61 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(record.resolve_endpoint).toBe("/v2/impulses/resolve")
       expect(record.resolve_request_format).toBe("pointer")
       expect(record.auth_scheme).toBe("none")
+      expect(record.auth_token_source).toBe("caller_identity")
+      expect(record.auth_delegation_mode).toBe("forward")
+    })
+
+    test("partial override: only auth_token_source set → other five get defaults", () => {
+      const record = registry.register({
+        vesselId: "vessel-token-source-only",
+        vesselName: "Token Source Vessel",
+        version: "1.0.0",
+        endpoint: "http://localhost:9000",
+        shapes: ["uiState"],
+        auth_token_source: "user_identity"
+      })
+
+      expect(record.auth_token_source).toBe("user_identity")
+      expect(record.auth_delegation_mode).toBe("forward")
+      expect(record.resolve_endpoint).toBe("/v2/impulses/resolve")
+      expect(record.resolve_request_format).toBe("pointer")
+      expect(record.auth_scheme).toBe("none")
+      expect(record.resolve_timeout_ms).toBeUndefined()
+    })
+
+    test("partial override: only auth_delegation_mode set → others get defaults", () => {
+      const record = registry.register({
+        vesselId: "vessel-deleg-only",
+        vesselName: "Delegation Vessel",
+        version: "1.0.0",
+        endpoint: "http://localhost:9000",
+        shapes: ["uiState"],
+        auth_delegation_mode: "mint"
+      })
+
+      expect(record.auth_delegation_mode).toBe("mint")
+      // Token source still defaults — caller may treat the combo as
+      // meaningless (mint is meaningful only for user_identity), but
+      // normalization still applies the defaults.
+      expect(record.auth_token_source).toBe("caller_identity")
+    })
+
+    test("'no_token' auth_token_source survives normalization", () => {
+      const record = registry.register({
+        vesselId: "vessel-no-token",
+        vesselName: "No-Token Vessel",
+        version: "1.0.0",
+        endpoint: "http://localhost:9000",
+        shapes: ["proxy"],
+        auth_token_source: "no_token"
+      })
+
+      expect(record.auth_token_source).toBe("no_token")
     })
   })
 
   describe("VesselCapability surfaces the contract", () => {
-    test("resolveVesselCapability returns the four fields populated", async () => {
+    test("resolveVesselCapability returns the six fields populated", async () => {
       registry.register({
         vesselId: "vessel-cap-1",
         vesselName: "Cap Vessel",
@@ -118,7 +178,9 @@ describe("Resolve Contract (Wave 1A)", () => {
         resolve_endpoint: "/mcp/tools/call",
         resolve_request_format: "mcp-tool",
         auth_scheme: "Bearer",
-        resolve_timeout_ms: 7500
+        resolve_timeout_ms: 7500,
+        auth_token_source: "user_identity",
+        auth_delegation_mode: "forward"
       })
 
       // Swap in the local registry for the duration of this assertion by
@@ -132,6 +194,8 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(v.resolve_request_format).toBe("mcp-tool")
       expect(v.auth_scheme).toBe("Bearer")
       expect(v.resolve_timeout_ms).toBe(7500)
+      expect(v.auth_token_source).toBe("user_identity")
+      expect(v.auth_delegation_mode).toBe("forward")
     })
 
     test("defaults also propagate through VesselCapability", async () => {
@@ -149,6 +213,8 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(v.resolve_request_format).toBe("pointer")
       expect(v.auth_scheme).toBe("none")
       expect(v.resolve_timeout_ms).toBeUndefined()
+      expect(v.auth_token_source).toBe("caller_identity")
+      expect(v.auth_delegation_mode).toBe("forward")
     })
   })
 
@@ -174,7 +240,7 @@ describe("Resolve Contract (Wave 1A)", () => {
       globalRegistry.list().forEach(v => globalRegistry.unregister(v.vesselId))
     })
 
-    test("registering with all four fields, resolve returns them", async () => {
+    test("registering with all six fields, resolve returns them", async () => {
       const registerRes = await app.request("/register", {
         method: "POST",
         headers: AUTH_HEADERS,
@@ -187,7 +253,9 @@ describe("Resolve Contract (Wave 1A)", () => {
           resolve_endpoint: "/custom/resolve",
           resolve_request_format: "mcp-tool",
           auth_scheme: "ApiKey",
-          resolve_timeout_ms: 4200
+          resolve_timeout_ms: 4200,
+          auth_token_source: "user_identity",
+          auth_delegation_mode: "mint"
         })
       })
       expect(registerRes.status).toBe(201)
@@ -212,9 +280,11 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(v.resolve_request_format).toBe("mcp-tool")
       expect(v.auth_scheme).toBe("ApiKey")
       expect(v.resolve_timeout_ms).toBe(4200)
+      expect(v.auth_token_source).toBe("user_identity")
+      expect(v.auth_delegation_mode).toBe("mint")
     })
 
-    test("registering with NONE of the four fields, resolve returns defaults", async () => {
+    test("registering with NONE of the six fields, resolve returns defaults", async () => {
       const registerRes = await app.request("/register", {
         method: "POST",
         headers: AUTH_HEADERS,
@@ -244,6 +314,8 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(v.resolve_request_format).toBe("pointer")
       expect(v.auth_scheme).toBe("none")
       expect(v.resolve_timeout_ms).toBeUndefined()
+      expect(v.auth_token_source).toBe("caller_identity")
+      expect(v.auth_delegation_mode).toBe("forward")
     })
 
     test("partial override through the HTTP surface", async () => {
@@ -256,7 +328,8 @@ describe("Resolve Contract (Wave 1A)", () => {
           version: "1.0.0",
           endpoint: "http://e2e.local:9000",
           shapes: ["e2ePartialShape"],
-          auth_scheme: "ApiKey"
+          auth_scheme: "ApiKey",
+          auth_token_source: "user_identity"
         })
       })
 
@@ -276,6 +349,9 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(v.resolve_endpoint).toBe("/v2/impulses/resolve")
       expect(v.resolve_request_format).toBe("pointer")
       expect(v.resolve_timeout_ms).toBeUndefined()
+      expect(v.auth_token_source).toBe("user_identity")
+      // Defaults applied for the auth_delegation_mode that was not advertised.
+      expect(v.auth_delegation_mode).toBe("forward")
     })
   })
 
@@ -305,6 +381,10 @@ describe("Resolve Contract (Wave 1A)", () => {
       expect(vessels[0]!.resolve_endpoint).toBeDefined()
       expect(vessels[0]!.resolve_request_format).toBeDefined()
       expect(vessels[0]!.auth_scheme).toBeDefined()
+      // New auth-token-source fields default to caller_identity / forward
+      // for legacy registrations — preserves pre-2026-04-23 behavior.
+      expect(vessels[0]!.auth_token_source).toBe("caller_identity")
+      expect(vessels[0]!.auth_delegation_mode).toBe("forward")
     })
   })
 })

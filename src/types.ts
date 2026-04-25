@@ -25,12 +25,48 @@ export type ResolveRequestFormat = "pointer" | "mcp-tool"
  */
 export type ResolveAuthScheme = "none" | "ApiKey" | "Bearer"
 
+/**
+ * Which credential the caller should attach when invoking this vessel's
+ * resolve endpoint. Pairs with `ResolveAuthScheme`, which says *how* to
+ * format the Authorization header; this says *whose* token to format.
+ *
+ *   "caller_identity"  caller's own service token (e.g. METABOB_API_KEY).
+ *                      Default — preserves pre-2026-04-23 behavior.
+ *   "user_identity"    a user JWT the caller is acting on behalf of.
+ *   "service_identity" alias for caller_identity, future-reserved.
+ *   "no_token"         vessel explicitly wants no Authorization header,
+ *                      even if `auth_scheme` would normally attach one.
+ *
+ * See `docs/specs/auth-token-source-field.md` in the super-repo.
+ */
+export type AuthTokenSource =
+  | "caller_identity"
+  | "user_identity"
+  | "service_identity"
+  | "no_token"
+
+/**
+ * For vessels that advertise `auth_token_source: "user_identity"`, declares
+ * how the caller obtains the token to send.
+ *
+ *   "forward" caller forwards the user JWT it already holds.
+ *   "mint"    caller asks identity-vessel to mint a target-bound token.
+ *   "none"    vessel does not accept delegation.
+ *
+ * Default: `"forward"`.
+ */
+export type AuthDelegationMode = "forward" | "mint" | "none"
+
 /** Default HTTP path for impulse resolution on a vessel. */
 export const DEFAULT_RESOLVE_ENDPOINT = "/v2/impulses/resolve"
 /** Default resolve request body encoding. */
 export const DEFAULT_RESOLVE_REQUEST_FORMAT: ResolveRequestFormat = "pointer"
 /** Default auth scheme (no auth). */
 export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none"
+/** Default credential kind (caller's own service identity). */
+export const DEFAULT_AUTH_TOKEN_SOURCE: AuthTokenSource = "caller_identity"
+/** Default delegation mode for user-identity tokens. */
+export const DEFAULT_AUTH_DELEGATION_MODE: AuthDelegationMode = "forward"
 
 // =============================================================================
 // AUTHENTICATION
@@ -89,6 +125,16 @@ export interface VesselRegistration {
 
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
   resolve_timeout_ms?: number
+
+  // --- Auth token source (Wave A3, 2026-04-23) ------------------------------
+  /** Which credential kind the caller should attach. Normalized at write
+   *  time — defaults to "caller_identity" when absent on input. */
+  auth_token_source: AuthTokenSource
+
+  /** Delegation mode for user-identity tokens. Normalized at write time —
+   *  defaults to "forward" when absent on input. Meaningful only when
+   *  `auth_token_source === "user_identity"`. */
+  auth_delegation_mode: AuthDelegationMode
 
   /** Additional metadata */
   metadata?: {
@@ -221,6 +267,12 @@ export interface VesselCapability {
   auth_scheme: ResolveAuthScheme
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
   resolve_timeout_ms?: number
+
+  // --- Auth token source (Wave A3, 2026-04-23) ------------------------------
+  /** Which credential kind the caller should attach. */
+  auth_token_source: AuthTokenSource
+  /** Delegation mode for user-identity tokens. */
+  auth_delegation_mode: AuthDelegationMode
 }
 
 export interface VesselCapabilityResult {
@@ -317,6 +369,12 @@ export interface RegisterRequest {
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms).
    *  Left unset by default; client applies its own default (typically 5000). */
   resolve_timeout_ms?: number
+
+  // --- Auth token source (Wave A3, 2026-04-23, all optional) ---------------
+  /** Which credential kind callers should attach. Default: "caller_identity". */
+  auth_token_source?: AuthTokenSource
+  /** Delegation mode for user-identity tokens. Default: "forward". */
+  auth_delegation_mode?: AuthDelegationMode
 
   // Phase 1: Explicit typed properties
   /** Whether the vessel maintains state */

@@ -9,7 +9,9 @@ import type { VesselRegistration } from "./types"
 import {
   DEFAULT_RESOLVE_ENDPOINT,
   DEFAULT_RESOLVE_REQUEST_FORMAT,
-  DEFAULT_RESOLVE_AUTH_SCHEME
+  DEFAULT_RESOLVE_AUTH_SCHEME,
+  DEFAULT_AUTH_TOKEN_SOURCE,
+  DEFAULT_AUTH_DELEGATION_MODE
 } from "./types"
 import { discoveryMetrics } from "./metrics"
 
@@ -63,8 +65,9 @@ export class VesselRegistry {
    * Register a vessel's capabilities.
    *
    * The resolve-contract fields (`resolve_endpoint`, `resolve_request_format`,
-   * `auth_scheme`, `resolve_timeout_ms`) are optional on input and get
-   * normalized to defaults at write time — the stored `VesselRegistration`
+   * `auth_scheme`, `resolve_timeout_ms`) and auth-token-source fields
+   * (`auth_token_source`, `auth_delegation_mode`) are optional on input and
+   * get normalized to defaults at write time — the stored `VesselRegistration`
    * always has them populated (except `resolve_timeout_ms`, which stays
    * undefined when not advertised so the client can apply its own default).
    */
@@ -79,6 +82,8 @@ export class VesselRegistry {
           | "resolve_request_format"
           | "auth_scheme"
           | "resolve_timeout_ms"
+          | "auth_token_source"
+          | "auth_delegation_mode"
         >
       & Partial<
           Pick<
@@ -87,6 +92,8 @@ export class VesselRegistry {
             | "resolve_request_format"
             | "auth_scheme"
             | "resolve_timeout_ms"
+            | "auth_token_source"
+            | "auth_delegation_mode"
           >
         >
   ): VesselRegistration {
@@ -112,6 +119,9 @@ export class VesselRegistry {
       resolve_request_format: registration.resolve_request_format ?? DEFAULT_RESOLVE_REQUEST_FORMAT,
       auth_scheme: registration.auth_scheme ?? DEFAULT_RESOLVE_AUTH_SCHEME,
       resolve_timeout_ms: registration.resolve_timeout_ms, // stays undefined when not advertised
+      // Same pattern for auth-token-source contract (Wave A3, 2026-04-23).
+      auth_token_source: registration.auth_token_source ?? DEFAULT_AUTH_TOKEN_SOURCE,
+      auth_delegation_mode: registration.auth_delegation_mode ?? DEFAULT_AUTH_DELEGATION_MODE,
       registeredAt: existing?.registeredAt ?? startTime,
       lastHeartbeat: startTime,
       expiresAt: startTime + DEFAULT_TTL_MS,

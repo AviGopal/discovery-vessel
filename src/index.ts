@@ -113,7 +113,11 @@ export function createServer() {
         resolve_endpoint: request.resolve_endpoint,
         resolve_request_format: request.resolve_request_format,
         auth_scheme: request.auth_scheme,
-        resolve_timeout_ms: request.resolve_timeout_ms
+        resolve_timeout_ms: request.resolve_timeout_ms,
+        // Wave A3 (2026-04-23): auth-token-source contract. Same pattern —
+        // optional on input, normalized to defaults at write time.
+        auth_token_source: request.auth_token_source,
+        auth_delegation_mode: request.auth_delegation_mode
       })
 
       const response: RegisterResponse = {
