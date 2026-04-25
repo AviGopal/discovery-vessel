@@ -198,15 +198,26 @@ describe("VesselRegistry", () => {
         orgId: "org-123"
       })
 
-      // Without orgId filter, returns all
-      const all = registry.findByShape("file")
-      expect(all.length).toBe(3)
+      // System vessel visible to all orgs
+      registry.register({
+        vesselId: "vessel-system",
+        vesselName: "System",
+        version: "1.0.0",
+        endpoint: "http://localhost:8084",
+        shapes: ["file"],
+        systemVessel: true
+      })
 
-      // With orgId filter, returns vessels with that orgId OR no orgId (public)
-      // vessel-1 and vessel-2 have no orgId (public), vessel-4 has org-123
+      // Without orgId filter, returns all (including vessels with no orgId)
+      const all = registry.findByShape("file")
+      expect(all.length).toBe(4) // vessel-1, vessel-2, vessel-4, vessel-system
+
+      // With orgId filter: only vessels matching the orgId OR systemVessel=true.
+      // vessel-1 and vessel-2 have no orgId (and no systemVessel) → excluded.
+      // vessel-4 has org-123 → included. vessel-system has systemVessel=true → included.
       const filtered = registry.findByShape("file", { orgId: "org-123" })
-      expect(filtered.length).toBe(3) // All 3 vessels match (2 public + 1 org-123)
-      expect(filtered.map(v => v.vesselId).sort()).toEqual(["vessel-1", "vessel-2", "vessel-4"])
+      expect(filtered.length).toBe(2)
+      expect(filtered.map(v => v.vesselId).sort()).toEqual(["vessel-4", "vessel-system"])
     })
 
     test("getShapes returns all unique shapes", () => {

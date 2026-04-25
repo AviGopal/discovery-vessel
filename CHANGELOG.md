@@ -2,6 +2,18 @@
 
 All notable changes to discovery-vessel.
 
+## [0.3.0] - 2026-04-25
+
+### Security
+- All mutation endpoints (POST /register, POST /resolve, POST /heartbeat, DELETE /vessels/:id) now require `Authorization: ApiKey` validated against identity-vessel; unauthenticated callers receive 401
+- Vessel `orgId` on registration is now bound to the validated caller's org — request body `orgId` is ignored, preventing cross-tenant spoofing
+- DELETE /vessels/:id enforces vessel ownership; mismatched org returns 403
+- Fixed tenant isolation leak: vessels with null `orgId` no longer visible to all tenants
+- Added `systemVessel: boolean` flag for explicitly cross-tenant platform vessels
+
+### Added
+- `src/middleware/auth.ts` — `authMiddleware`, `getAuthContext()`, configurable via `IDENTITY_VESSEL_URL` env var
+
 ## [0.2.0] - 2026-04-25
 
 ### Added

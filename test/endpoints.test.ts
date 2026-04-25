@@ -14,12 +14,34 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../src/index"
+import { setIdentityValidator } from "../src/middleware/auth"
 import type { Hono } from "hono"
+
+// ---------------------------------------------------------------------------
+// Shared auth helper
+// ---------------------------------------------------------------------------
+
+const TEST_ORG_ID = "test-org"
+const TEST_AUTH_HEADER = "ApiKey test-key-valid"
+
+/** Headers used on mutation requests so the auth middleware is satisfied. */
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: TEST_AUTH_HEADER
+}
 
 describe("Discovery Vessel Endpoints", () => {
   let app: Hono
 
   beforeEach(() => {
+    // Install a mock identity validator so tests never hit a real HTTP endpoint.
+    setIdentityValidator(async (_key: string) => ({
+      orgId: TEST_ORG_ID,
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
+
     app = createServer()
     // Clear registry before each test
     const allVessels = registry.list()
@@ -27,6 +49,8 @@ describe("Discovery Vessel Endpoints", () => {
   })
 
   afterEach(() => {
+    // Restore default validator
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -62,7 +86,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("registers a new vessel", async () => {
       const res = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "test-vessel",
           vesselName: "Test Vessel",
@@ -90,7 +114,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("validates required fields", async () => {
       const res = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "test-vessel"
           // Missing endpoint and shapes
@@ -107,7 +131,7 @@ describe("Discovery Vessel Endpoints", () => {
       // First registration
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           vesselName: "V1",
@@ -120,7 +144,7 @@ describe("Discovery Vessel Endpoints", () => {
       // Second registration with different shapes
       const res = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           vesselName: "V1 Updated",
@@ -152,7 +176,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("updates heartbeat timestamp", async () => {
       const res = await app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1"
         })
@@ -168,7 +192,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("stores metrics from heartbeat", async () => {
       const res = await app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           metrics: {
@@ -192,7 +216,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("returns 404 for unregistered vessel", async () => {
       const res = await app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "unknown-vessel"
         })
@@ -207,7 +231,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("validates vesselId is present", async () => {
       const res = await app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({})
       })
 
@@ -228,7 +252,8 @@ describe("Discovery Vessel Endpoints", () => {
 
     test("unregisters a vessel", async () => {
       const res = await app.request("/vessels/vessel-1", {
-        method: "DELETE"
+        method: "DELETE",
+        headers: { Authorization: TEST_AUTH_HEADER }
       })
 
       expect(res.status).toBe(200)
@@ -243,7 +268,8 @@ describe("Discovery Vessel Endpoints", () => {
 
     test("returns 404 for unknown vessel", async () => {
       const res = await app.request("/vessels/unknown-vessel", {
-        method: "DELETE"
+        method: "DELETE",
+        headers: { Authorization: TEST_AUTH_HEADER }
       })
 
       expect(res.status).toBe(404)
@@ -276,7 +302,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("resolves vesselCapability pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -297,7 +323,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("resolves vesselEndpoint pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselEndpoint",
@@ -317,7 +343,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("resolves vesselHealth pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselHealth",
@@ -337,7 +363,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("resolves vesselRegistry pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselRegistry"
@@ -355,7 +381,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("filters vesselCapability by excludeVessels", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -375,7 +401,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("filters vesselCapability by orgId", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -388,17 +414,18 @@ describe("Discovery Vessel Endpoints", () => {
       expect(res.status).toBe(200)
 
       const data = await res.json()
-      // Returns vessels with org-123 OR no orgId (public)
-      // vessel-1 has org-123, vessel-2 has no orgId
-      expect(data.content.vessels.length).toBe(2)
+      // Only returns vessels whose orgId matches OR that are systemVessel=true.
+      // vessel-1 has orgId "org-123" → included.
+      // vessel-2 has no orgId and no systemVessel flag → excluded (tenant isolation).
+      expect(data.content.vessels.length).toBe(1)
       expect(data.content.vessels.some((v: any) => v.vesselId === "vessel-1")).toBe(true)
-      expect(data.content.vessels.some((v: any) => v.vesselId === "vessel-2")).toBe(true)
+      expect(data.content.vessels.some((v: any) => v.vesselId === "vessel-2")).toBe(false)
     })
 
     test("returns 404 for unknown vessel in vesselEndpoint", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselEndpoint",
@@ -413,7 +440,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("returns 400 for missing pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({})
       })
 
@@ -423,7 +450,7 @@ describe("Discovery Vessel Endpoints", () => {
     test("returns 404 for unknown pointer type", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "unknownType"

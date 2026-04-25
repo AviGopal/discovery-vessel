@@ -10,18 +10,31 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../../src/index"
+import { setIdentityValidator } from "../../src/middleware/auth"
 import type { Hono } from "hono"
+
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Chaos Test: Network Partition", () => {
   let app: Hono
 
   beforeEach(() => {
+    setIdentityValidator(async (_key: string) => ({
+      orgId: "test-org",
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
     app = createServer()
     const allVessels = registry.list()
     allVessels.forEach(v => registry.unregister(v.vesselId))
   })
 
   afterEach(() => {
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -40,7 +53,7 @@ describe("Chaos Test: Network Partition", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -66,7 +79,7 @@ describe("Chaos Test: Network Partition", () => {
           // Some requests might get through
           const res = await app.request("/resolve", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               pointer: { type: "vesselCapability", shape: "file" }
             })
@@ -91,7 +104,7 @@ describe("Chaos Test: Network Partition", () => {
       Array.from({ length: 20 }, () =>
         app.request("/resolve", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             pointer: { type: "vesselCapability", shape: "file" }
           })
@@ -130,7 +143,7 @@ describe("Chaos Test: Network Partition", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -145,7 +158,7 @@ describe("Chaos Test: Network Partition", () => {
         }
         return app.request("/heartbeat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({ vesselId: `vessel-${i}` })
         })
       })
@@ -163,7 +176,7 @@ describe("Chaos Test: Network Partition", () => {
       Array.from({ length: vesselCount }, (_, i) =>
         app.request("/heartbeat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             vesselId: `vessel-${i}`,
             metrics: {
@@ -211,14 +224,14 @@ describe("Chaos Test: Network Partition", () => {
       ...groupA.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       ),
       ...groupB.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -234,7 +247,7 @@ describe("Chaos Test: Network Partition", () => {
     // Group A can still query
     const queryGroupA = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })
@@ -247,7 +260,7 @@ describe("Chaos Test: Network Partition", () => {
     // After partition heals, verify consistency
     const finalQuery = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })
@@ -279,7 +292,7 @@ describe("Chaos Test: Network Partition", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -294,7 +307,7 @@ describe("Chaos Test: Network Partition", () => {
         }
         return app.request("/heartbeat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({ vesselId: `vessel-${i}` })
         })
       })
@@ -309,7 +322,7 @@ describe("Chaos Test: Network Partition", () => {
     // Query should still return healthy vessels
     const query = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })
@@ -344,7 +357,7 @@ describe("Chaos Test: Network Partition", () => {
 
         return await app.request("/resolve", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             pointer: { type: "vesselCapability", shape: "file" }
           })
@@ -361,7 +374,7 @@ describe("Chaos Test: Network Partition", () => {
     // First, register a vessel
     await app.request("/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         vesselId: "vessel-1",
         vesselName: "Vessel 1",
@@ -407,7 +420,7 @@ describe("Chaos Test: Network Partition", () => {
         if (op.type === "register") {
           return await app.request("/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               vesselId: op.vesselId,
               vesselName: `Vessel ${op.vesselId}`,
@@ -419,13 +432,13 @@ describe("Chaos Test: Network Partition", () => {
         } else if (op.type === "heartbeat") {
           return await app.request("/heartbeat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({ vesselId: op.vesselId })
           })
         } else if (op.type === "query") {
           return await app.request("/resolve", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               pointer: { type: "vesselCapability", shape: op.shape }
             })
@@ -443,7 +456,7 @@ describe("Chaos Test: Network Partition", () => {
     // Verify registry is still functional
     const query = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })

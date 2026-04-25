@@ -33,6 +33,21 @@ export const DEFAULT_RESOLVE_REQUEST_FORMAT: ResolveRequestFormat = "pointer"
 export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none"
 
 // =============================================================================
+// AUTHENTICATION
+// =============================================================================
+
+/**
+ * Resolved auth context populated by the auth middleware on every authenticated
+ * request. Available via `getAuthContext(c)` in route handlers.
+ */
+export interface AuthContext {
+  orgId: string
+  userId: string
+  keyId: string
+  scopes: string[]
+}
+
+// =============================================================================
 // VESSEL REGISTRATION
 // =============================================================================
 
@@ -53,6 +68,14 @@ export interface VesselRegistration {
 
   /** Organizational scope */
   orgId?: string
+
+  /**
+   * When `true`, this vessel is treated as a system vessel accessible to all
+   * tenants regardless of `orgId`. Discovery-vessel itself self-registers with
+   * this flag. Use `systemVessel: true` instead of leaving `orgId` undefined
+   * for public/shared infrastructure vessels.
+   */
+  systemVessel?: boolean
 
   // --- Resolve contract (Wave 1A) -------------------------------------------
   /** HTTP path appended to `endpoint` when resolving impulses. */
@@ -275,6 +298,8 @@ export interface RegisterRequest {
   shapes: string[]
   protocol?: string
   orgId?: string
+  /** System vessels are accessible to all tenants regardless of orgId. */
+  systemVessel?: boolean
   metadata?: Record<string, unknown>
   codebase?: {
     accessLevel: "read-write" | "read-only" | "none"

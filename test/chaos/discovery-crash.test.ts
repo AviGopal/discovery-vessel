@@ -10,18 +10,31 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../../src/index"
+import { setIdentityValidator } from "../../src/middleware/auth"
 import type { Hono } from "hono"
+
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Chaos Test: Discovery Crash", () => {
   let app: Hono
 
   beforeEach(() => {
+    setIdentityValidator(async (_key: string) => ({
+      orgId: "test-org",
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
     app = createServer()
     const allVessels = registry.list()
     allVessels.forEach(v => registry.unregister(v.vesselId))
   })
 
   afterEach(() => {
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -49,7 +62,7 @@ describe("Chaos Test: Discovery Crash", () => {
       try {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(registration)
         })
 
@@ -75,7 +88,7 @@ describe("Chaos Test: Discovery Crash", () => {
       try {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(registration)
         })
 
@@ -120,7 +133,7 @@ describe("Chaos Test: Discovery Crash", () => {
     for (const reg of registrations) {
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify(reg)
       })
     }
@@ -140,7 +153,7 @@ describe("Chaos Test: Discovery Crash", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -175,7 +188,7 @@ describe("Chaos Test: Discovery Crash", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -195,7 +208,7 @@ describe("Chaos Test: Discovery Crash", () => {
         }
         return app.request("/heartbeat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({ vesselId: `vessel-${i}` })
         })
       })
@@ -206,7 +219,7 @@ describe("Chaos Test: Discovery Crash", () => {
       Array.from({ length: vesselCount }, (_, i) =>
         app.request("/heartbeat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({ vesselId: `vessel-${i}` })
         }).then(res => {
           if (res.status === 200) heartbeatsSucceededAfterRecovery++
@@ -238,7 +251,7 @@ describe("Chaos Test: Discovery Crash", () => {
     // First registration attempt
     const res1 = await app.request("/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify(registration)
     })
     expect(res1.status).toBe(201)
@@ -246,7 +259,7 @@ describe("Chaos Test: Discovery Crash", () => {
     // Verify vessel is registered with all shapes
     const query1 = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })
@@ -263,7 +276,7 @@ describe("Chaos Test: Discovery Crash", () => {
 
     const res2 = await app.request("/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify(updatedRegistration)
     })
     expect(res2.status).toBe(201)
@@ -271,7 +284,7 @@ describe("Chaos Test: Discovery Crash", () => {
     // Verify old shapes are no longer associated
     const query2 = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "file" }
       })
@@ -283,7 +296,7 @@ describe("Chaos Test: Discovery Crash", () => {
     // Verify new shapes are associated
     const query3 = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: { type: "vesselCapability", shape: "newShape" }
       })
@@ -319,7 +332,7 @@ describe("Chaos Test: Discovery Crash", () => {
         registrations.map(reg =>
           app.request("/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify(reg)
           })
         )
@@ -337,7 +350,7 @@ describe("Chaos Test: Discovery Crash", () => {
         toRemove.map(v =>
           app.request("/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               vesselId: v.vesselId,
               vesselName: v.vesselName,

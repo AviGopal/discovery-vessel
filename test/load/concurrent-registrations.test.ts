@@ -11,12 +11,24 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../../src/index"
+import { setIdentityValidator } from "../../src/middleware/auth"
 import type { Hono } from "hono"
+
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Load Test: Concurrent Registrations", () => {
   let app: Hono
 
   beforeEach(() => {
+    setIdentityValidator(async (_key: string) => ({
+      orgId: "test-org",
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
     app = createServer()
     // Clear registry
     const allVessels = registry.list()
@@ -24,6 +36,7 @@ describe("Load Test: Concurrent Registrations", () => {
   })
 
   afterEach(() => {
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -49,7 +62,7 @@ describe("Load Test: Concurrent Registrations", () => {
     const promises = registrations.map(reg =>
       app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify(reg)
       })
     )
@@ -92,7 +105,7 @@ describe("Load Test: Concurrent Registrations", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -102,7 +115,7 @@ describe("Load Test: Concurrent Registrations", () => {
     const queryStartTime = Date.now()
     const queryRes = await app.request("/resolve", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: AUTH_HEADERS,
       body: JSON.stringify({
         pointer: {
           type: "vesselCapability",
@@ -143,7 +156,7 @@ describe("Load Test: Concurrent Registrations", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -163,7 +176,7 @@ describe("Load Test: Concurrent Registrations", () => {
     const promises = heartbeats.map(hb =>
       app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify(hb)
       })
     )
@@ -247,7 +260,7 @@ describe("Load Test: Concurrent Registrations", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )
@@ -259,7 +272,7 @@ describe("Load Test: Concurrent Registrations", () => {
     const queries = Array.from({ length: 50 }, () =>
       app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "file" }
         })
@@ -273,7 +286,7 @@ describe("Load Test: Concurrent Registrations", () => {
     const heartbeats = Array.from({ length: vesselCount }, (_, i) =>
       app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ vesselId: `vessel-${i}` })
       })
     )
@@ -283,7 +296,7 @@ describe("Load Test: Concurrent Registrations", () => {
     // Phase 4: Deregister half the vessels
     const deregisterStartTime = Date.now()
     const deregistrations = Array.from({ length: vesselCount / 2 }, (_, i) =>
-      app.request(`/vessels/vessel-${i}`, { method: "DELETE" })
+      app.request(`/vessels/vessel-${i}`, { method: "DELETE", headers: { Authorization: "ApiKey test-key" } })
     )
     await Promise.all(deregistrations)
     const deregisterTime = Date.now() - deregisterStartTime
@@ -324,7 +337,7 @@ describe("Load Test: Concurrent Registrations", () => {
       registrations.map(reg =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(reg)
         })
       )

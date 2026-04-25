@@ -11,12 +11,31 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../src/index"
+import { setIdentityValidator } from "../src/middleware/auth"
 import type { Hono } from "hono"
+
+// ---------------------------------------------------------------------------
+// Shared auth helpers
+// ---------------------------------------------------------------------------
+
+const TEST_ORG_ID = "org-metabob"
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Discovery Vessel Integration", () => {
   let app: Hono
 
   beforeEach(() => {
+    // Install a mock identity validator so tests never hit a real HTTP endpoint.
+    setIdentityValidator(async (_key: string) => ({
+      orgId: TEST_ORG_ID,
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
+
     app = createServer()
     // Clear registry before each test
     const allVessels = registry.list()
@@ -24,6 +43,7 @@ describe("Discovery Vessel Integration", () => {
   })
 
   afterEach(() => {
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -32,7 +52,7 @@ describe("Discovery Vessel Integration", () => {
       // 1. Register vessel
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "minibob-1",
           vesselName: "MiniBob Instance 1",
@@ -56,7 +76,7 @@ describe("Discovery Vessel Integration", () => {
       // 2. Query for file shape
       const queryRes1 = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -74,7 +94,7 @@ describe("Discovery Vessel Integration", () => {
       // 3. Send heartbeat with metrics
       const heartbeatRes = await app.request("/heartbeat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "minibob-1",
           metrics: {
@@ -90,7 +110,7 @@ describe("Discovery Vessel Integration", () => {
       // 4. Query health
       const healthRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselHealth",
@@ -110,7 +130,8 @@ describe("Discovery Vessel Integration", () => {
 
       // 5. Deregister
       const deregisterRes = await app.request("/vessels/minibob-1", {
-        method: "DELETE"
+        method: "DELETE",
+        headers: { Authorization: "ApiKey test-key" }
       })
 
       expect(deregisterRes.status).toBe(200)
@@ -118,7 +139,7 @@ describe("Discovery Vessel Integration", () => {
       // 6. Verify vessel is gone
       const queryRes2 = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -163,7 +184,7 @@ describe("Discovery Vessel Integration", () => {
       for (const vessel of vessels) {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(vessel)
         })
         expect(res.status).toBe(201)
@@ -172,7 +193,7 @@ describe("Discovery Vessel Integration", () => {
       // Query for file shape - should return 2 vessels
       const fileRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -191,7 +212,7 @@ describe("Discovery Vessel Integration", () => {
       // Query for activityTemplate - should return 2 vessels
       const templateRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -206,7 +227,7 @@ describe("Discovery Vessel Integration", () => {
       // Query for activityExecutionTrace - should return 1 vessel
       const traceRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -226,7 +247,7 @@ describe("Discovery Vessel Integration", () => {
       for (const vesselId of vessels) {
         await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             vesselId,
             vesselName: vesselId,
@@ -240,7 +261,7 @@ describe("Discovery Vessel Integration", () => {
       // Query excluding vessel-1 and vessel-3
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -258,63 +279,58 @@ describe("Discovery Vessel Integration", () => {
 
   describe("Multi-Tenant Isolation", () => {
     test("vessels filtered by organization", async () => {
-      // Register vessels in different orgs
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-org1-a",
-          vesselName: "Org1 Vessel A",
-          version: "1.0.0",
-          endpoint: "http://org1-a:8080",
-          shapes: ["file"],
-          orgId: "org-1"
-        })
+      // Register vessels directly in the registry (bypasses auth middleware so
+      // we can use multiple different orgIds without changing the mock).
+      registry.register({
+        vesselId: "vessel-org1-a",
+        vesselName: "Org1 Vessel A",
+        version: "1.0.0",
+        endpoint: "http://org1-a:8080",
+        shapes: ["file"],
+        orgId: "org-1"
       })
 
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-org1-b",
-          vesselName: "Org1 Vessel B",
-          version: "1.0.0",
-          endpoint: "http://org1-b:8080",
-          shapes: ["file"],
-          orgId: "org-1"
-        })
+      registry.register({
+        vesselId: "vessel-org1-b",
+        vesselName: "Org1 Vessel B",
+        version: "1.0.0",
+        endpoint: "http://org1-b:8080",
+        shapes: ["file"],
+        orgId: "org-1"
       })
 
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-org2",
-          vesselName: "Org2 Vessel",
-          version: "1.0.0",
-          endpoint: "http://org2:8080",
-          shapes: ["file"],
-          orgId: "org-2"
-        })
+      registry.register({
+        vesselId: "vessel-org2",
+        vesselName: "Org2 Vessel",
+        version: "1.0.0",
+        endpoint: "http://org2:8080",
+        shapes: ["file"],
+        orgId: "org-2"
       })
 
-      // Public vessel (no orgId)
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-public",
-          vesselName: "Public Vessel",
-          version: "1.0.0",
-          endpoint: "http://public:8080",
-          shapes: ["file"]
-        })
+      // System vessel (shared infrastructure, visible to all orgs)
+      registry.register({
+        vesselId: "vessel-system",
+        vesselName: "System Vessel",
+        version: "1.0.0",
+        endpoint: "http://system:8080",
+        shapes: ["file"],
+        systemVessel: true
+      })
+
+      // Vessel with no orgId and no systemVessel — NOT visible in org-scoped queries
+      registry.register({
+        vesselId: "vessel-no-org",
+        vesselName: "No-Org Vessel",
+        version: "1.0.0",
+        endpoint: "http://no-org:8080",
+        shapes: ["file"]
       })
 
       // Query for org-1
       const org1Res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -325,16 +341,16 @@ describe("Discovery Vessel Integration", () => {
       })
 
       const org1Data = await org1Res.json()
-      // Should return 2 vessels from org-1 + 1 public vessel = 3 total
+      // Should return 2 org-1 vessels + 1 system vessel = 3 total
+      // vessel-no-org is excluded because it has no orgId and no systemVessel
       expect(org1Data.content.vessels.length).toBe(3)
-      // Verify we have the 2 org-1 vessels and the public vessel
       const vesselIds = org1Data.content.vessels.map((v: any) => v.vesselId).sort()
-      expect(vesselIds).toEqual(["vessel-org1-a", "vessel-org1-b", "vessel-public"])
+      expect(vesselIds).toEqual(["vessel-org1-a", "vessel-org1-b", "vessel-system"])
 
       // Query for org-2
       const org2Res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -345,10 +361,10 @@ describe("Discovery Vessel Integration", () => {
       })
 
       const org2Data = await org2Res.json()
-      // Should return 1 vessel from org-2 + 1 public vessel = 2 total
+      // Should return 1 org-2 vessel + 1 system vessel = 2 total
       expect(org2Data.content.vessels.length).toBe(2)
       const org2VesselIds = org2Data.content.vessels.map((v: any) => v.vesselId).sort()
-      expect(org2VesselIds).toEqual(["vessel-org2", "vessel-public"])
+      expect(org2VesselIds).toEqual(["vessel-org2", "vessel-system"])
     })
   })
 
@@ -362,7 +378,7 @@ describe("Discovery Vessel Integration", () => {
       // Register 2 vessels
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "v1",
           vesselName: "V1",
@@ -374,7 +390,7 @@ describe("Discovery Vessel Integration", () => {
 
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "v2",
           vesselName: "V2",
@@ -392,7 +408,7 @@ describe("Discovery Vessel Integration", () => {
       expect(stats2.healthyCount).toBe(initialCount + 2)
 
       // Deregister one
-      await app.request("/vessels/v1", { method: "DELETE" })
+      await app.request("/vessels/v1", { method: "DELETE", headers: { Authorization: "ApiKey test-key" } })
 
       // Stats after deregistration
       const stats3Res = await app.request("/registry/stats")
@@ -406,7 +422,7 @@ describe("Discovery Vessel Integration", () => {
       // Initial registration
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           vesselName: "V1",
@@ -419,7 +435,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify initial shapes
       const res1 = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "file" }
         })
@@ -430,7 +446,7 @@ describe("Discovery Vessel Integration", () => {
       // Re-register with different shapes
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           vesselName: "V1",
@@ -443,7 +459,7 @@ describe("Discovery Vessel Integration", () => {
       // Old shape should not find vessel
       const res2 = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "file" }
         })
@@ -454,7 +470,7 @@ describe("Discovery Vessel Integration", () => {
       // New shape should find vessel
       const res3 = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "activityTemplate" }
         })
@@ -488,7 +504,7 @@ describe("Discovery Vessel Integration", () => {
       for (const testCase of testCases) {
         const res = await app.request(testCase.endpoint, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(testCase.body)
         })
 
@@ -504,7 +520,7 @@ describe("Discovery Vessel Integration", () => {
       // Register a stateful vessel with comprehensive state tracking
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "stateful-vessel-1",
           vesselName: "Stateful Activity Processor",
@@ -534,7 +550,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify the vessel was registered and we can query it
       const queryRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -555,7 +571,7 @@ describe("Discovery Vessel Integration", () => {
       // Register a vessel with multiple resolver capabilities
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "k8s-ops-vessel",
           vesselName: "Kubernetes Operations Vessel",
@@ -586,7 +602,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify vessel is discoverable by capability
       const queryRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -607,7 +623,7 @@ describe("Discovery Vessel Integration", () => {
       // Register a vessel that was discovered via peer discovery
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "discovered-vessel-peer",
           vesselName: "Peer-Discovered Vessel",
@@ -628,7 +644,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify vessel is discoverable
       const queryRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -650,7 +666,7 @@ describe("Discovery Vessel Integration", () => {
       const deployedAtTimestamp = Date.now()
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "k8s-deployment-vessel",
           vesselName: "K8s Cluster Vessel",
@@ -678,7 +694,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify vessel is discoverable and metadata persists
       const queryRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -700,7 +716,7 @@ describe("Discovery Vessel Integration", () => {
       // Register vessel with explicit commitSha
       const registerRes1 = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "commit-tracked-vessel-1",
           vesselName: "Commit-Tracked Vessel 1",
@@ -720,7 +736,7 @@ describe("Discovery Vessel Integration", () => {
       // Register another vessel with different commit
       const registerRes2 = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "commit-tracked-vessel-2",
           vesselName: "Commit-Tracked Vessel 2",
@@ -740,7 +756,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify both vessels are discoverable
       const queryRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -762,7 +778,7 @@ describe("Discovery Vessel Integration", () => {
       const deployedAtTimestamp = Date.now()
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "complex-phase1-vessel",
           vesselName: "Complex Phase 1 Test Vessel",
@@ -822,7 +838,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify vessel is discoverable by multiple shapes
       const fileShapeRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -839,7 +855,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify another shape
       const templateShapeRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -856,7 +872,7 @@ describe("Discovery Vessel Integration", () => {
       // Verify yet another shape
       const traceShapeRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",

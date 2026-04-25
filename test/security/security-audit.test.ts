@@ -11,18 +11,31 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { createServer, registry } from "../../src/index"
+import { setIdentityValidator } from "../../src/middleware/auth"
 import type { Hono } from "hono"
+
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Security Audit: Discovery Vessel", () => {
   let app: Hono
 
   beforeEach(() => {
+    setIdentityValidator(async (_key: string) => ({
+      orgId: "test-org",
+      userId: "test-user",
+      keyId: "test-key-id",
+      scopes: ["read", "write"]
+    }))
     app = createServer()
     const allVessels = registry.list()
     allVessels.forEach(v => registry.unregister(v.vesselId))
   })
 
   afterEach(() => {
+    setIdentityValidator(null)
     registry.stop()
   })
 
@@ -49,7 +62,7 @@ describe("Security Audit: Discovery Vessel", () => {
       for (const payload of malformedPayloads) {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify(payload)
         })
 
@@ -94,7 +107,7 @@ describe("Security Audit: Discovery Vessel", () => {
       for (const payload of injectionPayloads) {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             ...payload,
             vesselName: "Test Vessel",
@@ -111,7 +124,7 @@ describe("Security Audit: Discovery Vessel", () => {
           // If accepted, verify it was safely sanitized/escaped
           const query = await app.request("/resolve", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               pointer: { type: "vesselEndpoint", vesselId: payload.vesselId }
             })
@@ -136,7 +149,7 @@ describe("Security Audit: Discovery Vessel", () => {
       const largeVesselId = "v".repeat(10000)
       const res1 = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: largeVesselId,
           vesselName: "Vessel",
@@ -153,7 +166,7 @@ describe("Security Audit: Discovery Vessel", () => {
       const largeShapes = Array.from({ length: 10000 }, (_, i) => `shape-${i}`)
       const res2 = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-1",
           vesselName: "Vessel",
@@ -182,7 +195,7 @@ describe("Security Audit: Discovery Vessel", () => {
       for (const { vesselId, desc } of specialChars) {
         const res = await app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             vesselId,
             vesselName: "Vessel",
@@ -213,7 +226,7 @@ describe("Security Audit: Discovery Vessel", () => {
       const promises = Array.from({ length: 1000 }, () =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             vesselId,
             vesselName: "DoS Vessel",
@@ -257,7 +270,7 @@ describe("Security Audit: Discovery Vessel", () => {
       const promises = Array.from({ length: 100 }, (_, i) =>
         app.request("/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             vesselId: `vessel-${i}`,
             vesselName: `Vessel ${i}`,
@@ -293,7 +306,7 @@ describe("Security Audit: Discovery Vessel", () => {
         () => app.request("/registry/stats"),
         () => app.request("/resolve", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: AUTH_HEADERS,
           body: JSON.stringify({
             pointer: { type: "vesselCapability", shape: "file" }
           })
@@ -358,37 +371,30 @@ describe("Security Audit: Discovery Vessel", () => {
     })
 
     test("no privilege escalation via orgId manipulation", async () => {
-      // Register vessels in different orgs
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-org1",
-          vesselName: "Org1 Vessel",
-          version: "1.0.0",
-          endpoint: "http://vessel:8080",
-          shapes: ["file"],
-          orgId: "org-1"
-        })
+      // Register vessels directly with different orgIds (bypasses auth middleware,
+      // which would override orgId with the mock token's orgId).
+      registry.register({
+        vesselId: "vessel-org1",
+        vesselName: "Org1 Vessel",
+        version: "1.0.0",
+        endpoint: "http://vessel:8080",
+        shapes: ["file"],
+        orgId: "org-1"
       })
 
-      await app.request("/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vesselId: "vessel-org2",
-          vesselName: "Org2 Vessel",
-          version: "1.0.0",
-          endpoint: "http://vessel:8080",
-          shapes: ["file"],
-          orgId: "org-2"
-        })
+      registry.register({
+        vesselId: "vessel-org2",
+        vesselName: "Org2 Vessel",
+        version: "1.0.0",
+        endpoint: "http://vessel:8080",
+        shapes: ["file"],
+        orgId: "org-2"
       })
 
       // Try to query org-1's vessels using org-2 context
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: {
             type: "vesselCapability",
@@ -400,7 +406,7 @@ describe("Security Audit: Discovery Vessel", () => {
 
       const data = await res.json()
 
-      // Should only see org-2 vessels and public vessels
+      // Should only see org-2 vessels (org-1 vessel is not accessible to org-2)
       const org1Vessel = data.content.vessels.find((v: any) => v.vesselId === "vessel-org1")
       expect(org1Vessel).toBeUndefined()
 
@@ -423,7 +429,7 @@ describe("Security Audit: Discovery Vessel", () => {
         operations.push(
           app.request("/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               vesselId: `vessel-${i}`,
               vesselName: `Vessel ${i}`,
@@ -440,7 +446,7 @@ describe("Security Audit: Discovery Vessel", () => {
         operations.push(
           app.request("/heartbeat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({ vesselId: `vessel-${i}` })
           })
         )
@@ -451,7 +457,7 @@ describe("Security Audit: Discovery Vessel", () => {
         operations.push(
           app.request("/resolve", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: AUTH_HEADERS,
             body: JSON.stringify({
               pointer: { type: "vesselCapability", shape: "file" }
             })
@@ -485,7 +491,7 @@ describe("Security Audit: Discovery Vessel", () => {
       // Register vessel with sensitive metadata
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-sensitive",
           vesselName: "Sensitive Vessel",
@@ -502,7 +508,7 @@ describe("Security Audit: Discovery Vessel", () => {
       // Different client queries for different vessel
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "vessel-normal",
           vesselName: "Normal Vessel",
@@ -514,7 +520,7 @@ describe("Security Audit: Discovery Vessel", () => {
 
       const res = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselEndpoint", vesselId: "vessel-normal" }
         })

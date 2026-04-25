@@ -37,6 +37,28 @@ export class VesselRegistry {
     this.cleanupInterval = setInterval(() => this.pruneExpired(), 60_000)
   }
 
+  // ---------------------------------------------------------------------------
+  // Private tenant-isolation helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns true if `vessel` should be visible to the caller identified by
+   * `orgId`.
+   *
+   * A vessel is accessible when:
+   * 1. It is explicitly marked as a system vessel (`systemVessel === true`), OR
+   * 2. Its `orgId` matches the caller's `orgId` exactly.
+   *
+   * Vessels registered without `orgId` AND without `systemVessel: true` are
+   * NOT automatically public — they are only visible in unscoped queries
+   * (i.e. when no `orgId` filter is provided by the caller).
+   */
+  private isAccessibleTo(vessel: VesselRegistration, orgId: string): boolean {
+    return vessel.systemVessel === true || vessel.orgId === orgId
+  }
+
+  // ---------------------------------------------------------------------------
+
   /**
    * Register a vessel's capabilities.
    *
@@ -70,6 +92,17 @@ export class VesselRegistry {
   ): VesselRegistration {
     const startTime = Date.now()
     const existing = this.vessels.get(registration.vesselId)
+
+    // Warn when a vessel registers without both orgId and systemVessel=true.
+    // Such vessels are NOT visible in org-scoped queries (tenant isolation).
+    // This warning is intentionally not a hard reject for backward compat.
+    if (!registration.orgId && !registration.systemVessel) {
+      console.warn(
+        `[registry] Vessel "${registration.vesselId}" registered without orgId or systemVessel=true. ` +
+        "It will not appear in org-scoped discovery queries. " +
+        "Set systemVessel=true for shared infrastructure vessels."
+      )
+    }
 
     const record: VesselRegistration = {
       ...registration,
@@ -163,7 +196,7 @@ export class VesselRegistry {
 
     // Filter by org if specified
     if (options?.orgId) {
-      results = results.filter(v => !v.orgId || v.orgId === options.orgId)
+      results = results.filter(v => this.isAccessibleTo(v, options.orgId!))
     }
 
     // Exclude specific vessels
@@ -207,7 +240,7 @@ export class VesselRegistry {
 
     // Filter by org
     if (filters?.orgId) {
-      results = results.filter(v => !v.orgId || v.orgId === filters.orgId)
+      results = results.filter(v => this.isAccessibleTo(v, filters.orgId!))
     }
 
     return results

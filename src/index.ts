@@ -12,6 +12,7 @@ import { logger } from "hono/logger"
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
 import { resolve, getResolvableShapes } from "./resolvers"
 import { metricsRegistry } from "./metrics"
+import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -32,6 +33,7 @@ export function createServer() {
   // Middleware
   app.use("*", cors())
   app.use("*", logger())
+  app.use("*", authMiddleware)
 
   // Health check
   app.get("/health", (c) => {
@@ -82,6 +84,12 @@ export function createServer() {
         return c.json({ error: "Missing required fields: vesselId, endpoint, shapes" }, 400)
       }
 
+      // Use the authenticated caller's orgId. The body's orgId is ignored in
+      // favour of the verified identity so that a caller cannot register
+      // vessels under a different tenant's namespace.
+      const auth = getAuthContextOptional(c)
+      const orgId = auth?.orgId ?? request.orgId
+
       const registration = registry.register({
         vesselId: request.vesselId,
         vesselName: request.vesselName ?? request.vesselId,
@@ -89,7 +97,8 @@ export function createServer() {
         endpoint: request.endpoint,
         shapes: request.shapes,
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | undefined,
-        orgId: request.orgId,
+        orgId,
+        systemVessel: request.systemVessel,
         metadata: request.metadata,
         codebase: request.codebase,
         // Phase 1: Explicit typed properties
@@ -150,6 +159,25 @@ export function createServer() {
   // Unregister a vessel
   app.delete("/vessels/:vesselId", (c) => {
     const vesselId = c.req.param("vesselId")
+
+    // Verify the vessel belongs to the authenticated caller's org before
+    // allowing deletion. System vessels can be deleted by any authenticated
+    // caller (they are infrastructure-owned).
+    const auth = getAuthContextOptional(c)
+    if (auth) {
+      const vessel = registry.get(vesselId)
+      if (!vessel) {
+        return c.json({ error: "Vessel not found" }, 404)
+      }
+      // Reject cross-tenant deletion attempts
+      if (vessel.orgId && vessel.orgId !== auth.orgId) {
+        return c.json(
+          { error: { code: "FORBIDDEN", message: "You do not have permission to delete this vessel" } },
+          403
+        )
+      }
+    }
+
     const success = registry.unregister(vesselId)
 
     if (!success) {

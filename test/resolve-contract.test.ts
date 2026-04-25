@@ -16,8 +16,14 @@ import {
 } from "../src/types"
 import { resolveVesselCapability } from "../src/resolvers"
 import { createServer, registry as globalRegistry } from "../src/index"
+import { setIdentityValidator } from "../src/middleware/auth"
 import type { VesselCapabilityResult } from "../src/types"
 import type { Hono } from "hono"
+
+const AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  Authorization: "ApiKey test-key"
+}
 
 describe("Resolve Contract (Wave 1A)", () => {
   let registry: VesselRegistry
@@ -150,19 +156,28 @@ describe("Resolve Contract (Wave 1A)", () => {
     let app: Hono
 
     beforeEach(() => {
+      // Install mock identity validator so tests do not hit a real HTTP endpoint.
+      setIdentityValidator(async (_key: string) => ({
+        orgId: "test-org",
+        userId: "test-user",
+        keyId: "test-key-id",
+        scopes: ["read", "write"]
+      }))
+
       app = createServer()
       // Clear singleton registry used by the server
       globalRegistry.list().forEach(v => globalRegistry.unregister(v.vesselId))
     })
 
     afterEach(() => {
+      setIdentityValidator(null)
       globalRegistry.list().forEach(v => globalRegistry.unregister(v.vesselId))
     })
 
     test("registering with all four fields, resolve returns them", async () => {
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "e2e-full",
           vesselName: "E2E Full",
@@ -179,7 +194,7 @@ describe("Resolve Contract (Wave 1A)", () => {
 
       const resolveRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "e2eShape" }
         })
@@ -202,7 +217,7 @@ describe("Resolve Contract (Wave 1A)", () => {
     test("registering with NONE of the four fields, resolve returns defaults", async () => {
       const registerRes = await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "e2e-defaults",
           vesselName: "E2E Defaults",
@@ -215,7 +230,7 @@ describe("Resolve Contract (Wave 1A)", () => {
 
       const resolveRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "e2eDefaultShape" }
         })
@@ -234,7 +249,7 @@ describe("Resolve Contract (Wave 1A)", () => {
     test("partial override through the HTTP surface", async () => {
       await app.request("/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           vesselId: "e2e-partial",
           vesselName: "E2E Partial",
@@ -247,7 +262,7 @@ describe("Resolve Contract (Wave 1A)", () => {
 
       const resolveRes = await app.request("/resolve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           pointer: { type: "vesselCapability", shape: "e2ePartialShape" }
         })

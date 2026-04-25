@@ -32,6 +32,8 @@ async function selfRegister() {
     endpoint,
     shapes: getResolvableShapes(),
     protocol: "http",
+    // Discovery-vessel is shared infrastructure accessible to all tenants.
+    systemVessel: true,
     metadata: {
       environment: process.env.KUBERNETES_SERVICE_HOST ? "k8s-cluster" : "local",
       selfRegistered: true
