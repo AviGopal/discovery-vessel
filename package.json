@@ -1,6 +1,6 @@
 {
   "name": "@metabob/discovery-vessel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Discovery vessel - resolves vesselCapability, vesselEndpoint, vesselHealth impulses",
   "type": "module",
   "main": "./dist/index.js",
