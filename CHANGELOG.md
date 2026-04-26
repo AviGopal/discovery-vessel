@@ -2,6 +2,19 @@
 
 All notable changes to discovery-vessel.
 
+## [0.4.0] - 2026-04-23
+
+### Added
+- Resolver contract advertisement on registration so vessels self-describe how to be called, replacing hardcoded per-vessel client conventions:
+  - `resolve_endpoint` (default `/v2/impulses/resolve`)
+  - `resolve_request_format`: `pointer` | `mcp-tool` (default `pointer`)
+  - `auth_scheme`: `none` | `ApiKey` | `Bearer` (default `none`)
+  - `resolve_timeout_ms` (no default; client policy)
+- Auth delegation contract fields so vessels declare how to obtain tokens for downstream calls:
+  - `auth_token_source`: `client` | `vessel` (default `client`) — who provides the credential
+  - `auth_delegation_mode`: `forward` | `exchange` | `none` (default `none`) — how the vessel uses it
+- Normalize-at-write in `registry.register()` fills enum defaults so all consumers see populated contract fields; legacy registrations without these keys keep working.
+
 ## [0.3.0] - 2026-04-25
 
 ### Security
