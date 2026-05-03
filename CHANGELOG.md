@@ -2,6 +2,11 @@
 
 All notable changes to discovery-vessel.
 
+## [0.4.1] - 2026-05-03
+
+### Fixed
+- Auth middleware now validates API keys via `POST /v1/auth/resolve` instead of `POST /v1/keys/validate`, matching the canonical pattern used by activity-api. The old path rejected `mb-{b64}-{hmac}` format keys, causing all vessel registrations to fail with `INVALID_API_KEY` and leaving the registry at `totalVessels: 0`.
+
 ## [0.4.0] - 2026-04-23
 
 ### Added

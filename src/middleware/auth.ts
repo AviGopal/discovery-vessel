@@ -18,20 +18,22 @@ export interface AuthContext {
   scopes: string[]
 }
 
-interface IdentityValidateSuccess {
-  valid: true
-  org_id: string
-  user_id: string
-  key_id: string
-  scopes: string[]
+/**
+ * Response shape from identity-vessel POST /v1/auth/resolve.
+ * Mirrors the contract used by activity-api's validateApiKeyWithFallback.
+ */
+interface IdentityResolveResponse {
+  success: boolean
+  data?: {
+    authenticated: boolean
+    orgId: string
+    accountId?: string
+    userId: string
+    keyId: string
+    scopes: string[]
+    reason?: string
+  }
 }
-
-interface IdentityValidateFailure {
-  valid: false
-  message?: string
-}
-
-type IdentityValidateResponse = IdentityValidateSuccess | IdentityValidateFailure
 
 /**
  * Signature for an identity validator. The default implementation calls
@@ -61,14 +63,27 @@ const IDENTITY_VESSEL_URL =
   process.env.IDENTITY_VESSEL_URL ?? "https://identity.metabob.com"
 
 /**
- * Default identity validator — calls identity-vessel POST /v1/keys/validate.
+ * Default identity validator — calls identity-vessel POST /v1/auth/resolve.
+ *
+ * Uses the same endpoint and request shape as activity-api's
+ * validateApiKeyWithFallback (the canonical reference implementation).
+ * The old /v1/keys/validate path rejects mb-{b64}-{hmac} format keys that
+ * /v1/auth/resolve accepts correctly.
  */
 async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | null> {
   try {
-    const res = await fetch(`${IDENTITY_VESSEL_URL}/v1/keys/validate`, {
+    const res = await fetch(`${IDENTITY_VESSEL_URL}/v1/auth/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: apiKey }),
+      body: JSON.stringify({
+        impulse: {
+          type: "authentication",
+          pointer: {
+            type: "apiKey",
+            apiKey
+          }
+        }
+      }),
       signal: AbortSignal.timeout(5000)
     })
 
@@ -76,16 +91,16 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
       return null
     }
 
-    const data = (await res.json()) as IdentityValidateResponse
-    if (!data.valid) {
+    const data = (await res.json()) as IdentityResolveResponse
+    if (!data.success || !data.data?.authenticated) {
       return null
     }
 
     return {
-      orgId: data.org_id,
-      userId: data.user_id,
-      keyId: data.key_id,
-      scopes: data.scopes
+      orgId: data.data.orgId,
+      userId: data.data.userId,
+      keyId: data.data.keyId,
+      scopes: data.data.scopes
     }
   } catch {
     // Network error or timeout — treat as auth failure
