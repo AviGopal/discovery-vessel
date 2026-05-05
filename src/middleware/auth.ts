@@ -84,7 +84,7 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
           }
         }
       }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(10000)
     })
 
     if (!res.ok) {
