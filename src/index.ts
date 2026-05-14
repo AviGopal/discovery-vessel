@@ -200,10 +200,13 @@ export function createServer() {
     })
   })
 
-  // List all shapes available in the registry
+  // List all shapes available in the registry.
+  // Optional ?org_ids=id1,id2 filters to shapes accessible to those orgs.
   app.get("/registry/shapes", (c) => {
+    const orgIdsParam = c.req.query("org_ids")
+    const orgIds = orgIdsParam ? orgIdsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined
     return c.json({
-      shapes: registry.getShapes()
+      shapes: registry.getShapes(orgIds ? { orgIds } : undefined)
     })
   })
 

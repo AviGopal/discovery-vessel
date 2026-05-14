@@ -274,10 +274,26 @@ export class VesselRegistry {
   }
 
   /**
-   * Get all unique shapes across all vessels
+   * Get all unique shapes across all vessels.
+   *
+   * When `orgIds` is provided, only shapes from vessels accessible to at least
+   * one of the given orgIds are returned (system vessels are always included).
    */
-  getShapes(): string[] {
-    return Array.from(this.shapeIndex.keys())
+  getShapes(options?: { orgIds?: string[] }): string[] {
+    if (!options?.orgIds?.length) {
+      return Array.from(this.shapeIndex.keys())
+    }
+    const orgIds = options.orgIds
+    const accessible: string[] = []
+    for (const [shape, vesselIds] of this.shapeIndex) {
+      const reachable = Array.from(vesselIds).some(id => {
+        const vessel = this.vessels.get(id)
+        if (!vessel || this.isExpired(vessel)) return false
+        return vessel.systemVessel === true || (vessel.orgId != null && orgIds.includes(vessel.orgId))
+      })
+      if (reachable) accessible.push(shape)
+    }
+    return accessible
   }
 
   /**
