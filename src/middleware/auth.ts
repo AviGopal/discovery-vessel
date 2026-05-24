@@ -55,6 +55,11 @@ export const PUBLIC_PATHS: readonly string[] = [
   "/metrics/json"
 ]
 
+/** Path prefixes treated as public read-only (GET only). */
+export const PUBLIC_PATH_PREFIXES: readonly string[] = [
+  "/vessels/",
+]
+
 // =============================================================================
 // IDENTITY VALIDATOR (swappable for testing)
 // =============================================================================
@@ -169,6 +174,7 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
   // If an Authorization header IS provided we still validate it so callers can
   // optionally authenticate on public paths.
   const isPublic = (PUBLIC_PATHS as string[]).includes(normalisedPath)
+    || (c.req.method === "GET" && (PUBLIC_PATH_PREFIXES as string[]).some(p => normalisedPath.startsWith(p)))
   const authHeader = c.req.header("Authorization")
 
   if (isPublic && !authHeader) {

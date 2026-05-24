@@ -160,6 +160,22 @@ export function createServer() {
     }
   })
 
+  // Get vessel by ID — used by vessel-proxy to look up endpoint for vessel-prefixed resolvers
+  app.get("/vessels/:vesselId", (c) => {
+    const vesselId = c.req.param("vesselId")
+    const vessel = registry.get(vesselId)
+    if (!vessel) {
+      return c.json({ error: "Vessel not found" }, 404)
+    }
+    return c.json({
+      vesselId: vessel.vesselId,
+      endpoint: vessel.endpoint,
+      resolve_endpoint: vessel.resolve_endpoint,
+      shapes: vessel.shapes,
+      version: vessel.version,
+    })
+  })
+
   // Unregister a vessel
   app.delete("/vessels/:vesselId", (c) => {
     const vesselId = c.req.param("vesselId")
