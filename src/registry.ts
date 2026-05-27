@@ -14,6 +14,7 @@ import {
   DEFAULT_AUTH_DELEGATION_MODE
 } from "./types"
 import { discoveryMetrics } from "./metrics"
+import { publishVesselEvent } from "./event-bus"
 
 /** Default TTL for vessel registrations (5 minutes) */
 const DEFAULT_TTL_MS = 5 * 60 * 1000
@@ -157,6 +158,20 @@ export class VesselRegistry {
     discoveryMetrics.recordRegistration(registration.vesselId, duration, true)
     this.updateMetrics()
 
+    // Publish vessel.registered to the substrate event bus (best-effort).
+    // Per openspec/changes/2026-05-27-neutral-emitter-lifecycle-bus — consumers
+    // such as goal-host-vessel subscribe to this event to reactively register
+    // proxy resolvers without polling /shapes. Dissolves F-129 (registration race).
+    publishVesselEvent("vessel.registered", {
+      vessel_id: registration.vesselId,
+      shapes: registration.shapes,
+      resolve_endpoint: record.resolve_endpoint,
+      resolve_request_format: record.resolve_request_format,
+      auth_scheme: record.auth_scheme,
+      ttl_seconds: Math.round(DEFAULT_TTL_MS / 1000),
+      is_reregistration: existing !== undefined,
+    })
+
     return record
   }
 
@@ -189,6 +204,14 @@ export class VesselRegistry {
     }
 
     discoveryMetrics.recordHeartbeat(vesselId, true)
+
+    // Bus emit (best-effort) — consumers track liveness without polling.
+    publishVesselEvent("vessel.heartbeat", {
+      vessel_id: vesselId,
+      ttl_seconds: Math.round(DEFAULT_TTL_MS / 1000),
+      shapes_count: vessel.shapes.length,
+    })
+
     return true
   }
 
@@ -322,6 +345,14 @@ export class VesselRegistry {
 
         // Record expiration metric
         discoveryMetrics.recordDeregistration(vesselId, 'expired')
+
+        // Bus emit (best-effort).
+        publishVesselEvent("vessel.expired", {
+          vessel_id: vesselId,
+          last_heartbeat_ms: vessel.lastHeartbeat,
+          ttl_seconds: Math.round(DEFAULT_TTL_MS / 1000),
+          reason: "ttl_expired",
+        })
       }
     }
 
