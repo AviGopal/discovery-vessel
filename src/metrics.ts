@@ -187,7 +187,7 @@ class MetricsRegistry {
     const match = key.match(/^([^{]+)({.+})?$/)
     if (!match) return [key, '']
 
-    const [, name, labels = ''] = match
+    const [, name = '', labels = ''] = match
     return [name, labels]
   }
 }
