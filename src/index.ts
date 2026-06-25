@@ -27,6 +27,57 @@ import type {
 const VERSION = "0.1.0"
 const startTime = Date.now()
 
+// Peer-aware resolution (2026-06-25, SUBSTRATE_AS_NETWORK.md §9 — the fleet
+// control plane forwarding the cross-container recall of FLEET.md §4). When a
+// vesselCapability query finds NO local producer, forward it to configured peer
+// discovery instances, merge their vessels tagged discoveredVia:"peer". This is
+// the seam that turns single-substrate discovery into fleet discovery: a shape is
+// reachable across the boundary by the same capability-addressed query, so vessel
+// location stops mattering across substrates (location-transparency, extended).
+//
+// SAFE BY DEFAULT: PEER_DISCOVERY_ENDPOINTS empty → no forwarding → behaviour
+// byte-identical to before (a true no-op cutover). The X-Discovery-Depth header is
+// a strict hop limit so peer→peer→peer can't loop or fan out unbounded (MAX_PEER_DEPTH).
+const PEER_DISCOVERY_ENDPOINTS = (process.env.PEER_DISCOVERY_ENDPOINTS ?? "")
+  .split(",").map((s) => s.trim()).filter(Boolean)
+const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "1", 10)
+
+async function forwardToPeers(
+  pointer: DiscoveryPointer,
+  depth: number,
+  authHeader: string | undefined,
+): Promise<Array<Record<string, unknown>>> {
+  if (PEER_DISCOVERY_ENDPOINTS.length === 0 || depth >= MAX_PEER_DEPTH) return []
+  const merged: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  await Promise.all(PEER_DISCOVERY_ENDPOINTS.map(async (peer) => {
+    try {
+      const res = await fetch(`${peer.replace(/\/$/, "")}/resolve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
+          "X-Discovery-Depth": String(depth + 1),
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        body: JSON.stringify({ pointer }),
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as { content?: { vessels?: Array<Record<string, unknown>> } }
+      for (const v of data.content?.vessels ?? []) {
+        const id = String(v.vesselId ?? "")
+        if (id && seen.has(id)) continue
+        if (id) seen.add(id)
+        // Tag provenance so callers (and learning) can distinguish a local producer
+        // from a peer-resolved one — the discoveredVia:"peer" enum already exists in types.
+        merged.push({ ...v, discoveredVia: "peer", peerEndpoint: peer })
+      }
+    } catch { /* peer unreachable / timed out — skip it; the local result stands */ }
+  }))
+  return merged
+}
+
 export function createServer() {
   const app = new Hono()
 
@@ -58,6 +109,21 @@ export function createServer() {
       }
 
       const content = await resolve(pointer as DiscoveryPointer)
+
+      // Fleet-resolution: a capability query with no LOCAL producer is forwarded to
+      // peer discovery instances (depth-limited). No-op unless PEER_DISCOVERY_ENDPOINTS
+      // is set, so single-substrate behaviour is unchanged.
+      if (pointer.type === "vesselCapability") {
+        const cap = content as { vessels?: Array<Record<string, unknown>>; found?: boolean }
+        if (!cap.vessels || cap.vessels.length === 0) {
+          const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
+          const peerVessels = await forwardToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
+          if (peerVessels.length > 0) {
+            cap.vessels = [...(cap.vessels ?? []), ...peerVessels]
+            cap.found = true
+          }
+        }
+      }
 
       const response: ResolveResponse = {
         content,
