@@ -41,6 +41,19 @@ export class VesselRegistry {
    * catalogue a decomposition planner reads to match ANY advertised resolver.
    */
 
+  /**
+   * LEARNED descriptions (2026-06-28): shape -> {description, source, at}, set
+   * via POST /registry/shape-descriptions by the auto-describe tick. These fill
+   * the gap for shapes that NO live vessel advertises a description for, so the
+   * substrate can describe its own resolvers without a vessel owner re-registering.
+   *
+   * Precedence: a vessel-ADVERTISED description ALWAYS wins over a learned one
+   * (advertised = authoritative, co-located with the resolver). Learned entries
+   * are dropped at read time for shapes no longer in ANY live vessel's `shapes`
+   * (self-cleaning), so this map can hold stale keys but never leaks them.
+   */
+  private learnedDescriptions = new Map<string, { description: string; source: string; at: number }>()
+
   /** Cleanup interval handle */
   private cleanupInterval?: ReturnType<typeof setInterval>
 
@@ -342,6 +355,10 @@ export class VesselRegistry {
   getShapeDescriptions(options?: { orgIds?: string[] }): Record<string, string> {
     const orgIds = options?.orgIds
     const merged: Record<string, string> = {}
+    // Track which shapes are advertised by at least one accessible live vessel,
+    // so a learned description can fill the gap ONLY for shapes that are live
+    // but undescribed by their owner.
+    const liveShapes = new Set<string>()
     for (const vessel of this.vessels.values()) {
       if (this.isExpired(vessel)) continue
       if (orgIds?.length) {
@@ -350,17 +367,60 @@ export class VesselRegistry {
           (vessel.orgId != null && orgIds.includes(vessel.orgId))
         if (!reachable) continue
       }
+      for (const shape of vessel.shapes) liveShapes.add(shape)
       const descs = vessel.shape_descriptions
       if (!descs) continue
       const advertised = new Set(vessel.shapes)
       for (const [shape, desc] of Object.entries(descs)) {
         if (!advertised.has(shape)) continue // ignore stray keys not in `shapes`
         if (typeof desc !== "string" || desc.trim().length === 0) continue
-        if (merged[shape]) continue // first-non-empty-writer wins
+        if (merged[shape]) continue // first-non-empty-writer wins (advertised)
         merged[shape] = desc.trim()
       }
     }
+    // Fill remaining gaps with LEARNED descriptions. Advertised always wins
+    // (we skip any shape already in `merged`). Self-cleaning: only fill for a
+    // shape that some live, accessible vessel still advertises in `shapes`.
+    for (const [shape, entry] of this.learnedDescriptions) {
+      if (merged[shape]) continue // advertised wins
+      if (!liveShapes.has(shape)) continue // shape gone from the fleet — skip (and prune below)
+      merged[shape] = entry.description
+    }
     return merged
+  }
+
+  /**
+   * Set (upsert) a LEARNED description for a shape (auto-describe tick).
+   * The learned value only surfaces in getShapeDescriptions when no live vessel
+   * ADVERTISES a description for that shape (advertised-wins). Returns the stored
+   * entry. Empty/blank descriptions are rejected (no-op, returns null).
+   *
+   * Also opportunistically prunes learned entries for shapes that are no longer
+   * advertised by ANY live vessel, so the map self-cleans over time.
+   */
+  setLearnedDescription(shape: string, description: string, source = "auto"):
+    { description: string; source: string; at: number } | null {
+    if (typeof shape !== "string" || shape.trim().length === 0) return null
+    if (typeof description !== "string" || description.trim().length === 0) return null
+    const entry = { description: description.trim(), source, at: Date.now() }
+    this.learnedDescriptions.set(shape.trim(), entry)
+    this.pruneLearnedDescriptions()
+    return entry
+  }
+
+  /**
+   * Drop learned descriptions for shapes no longer advertised by any live vessel.
+   */
+  private pruneLearnedDescriptions(): void {
+    if (this.learnedDescriptions.size === 0) return
+    const liveShapes = new Set<string>()
+    for (const vessel of this.vessels.values()) {
+      if (this.isExpired(vessel)) continue
+      for (const shape of vessel.shapes) liveShapes.add(shape)
+    }
+    for (const shape of this.learnedDescriptions.keys()) {
+      if (!liveShapes.has(shape)) this.learnedDescriptions.delete(shape)
+    }
   }
 
   /**
@@ -402,6 +462,8 @@ export class VesselRegistry {
 
     if (pruned.length > 0) {
       this.updateMetrics()
+      // Drop learned descriptions for shapes whose last advertising vessel expired.
+      this.pruneLearnedDescriptions()
     }
 
     return pruned

@@ -309,6 +309,32 @@ export function createServer() {
     })
   })
 
+  // Set a LEARNED description for a shape (auto-describe tick, 2026-06-28).
+  // Body: { shape, description, source?:"auto" }. Fills the description gap for
+  // shapes no live vessel advertises a description for, so the substrate can
+  // describe its OWN resolvers without a vessel owner re-registering. A vessel-
+  // ADVERTISED description always wins over a learned one (see getShapeDescriptions).
+  // Auth: requires ApiKey (not in PUBLIC_PATHS, and POST), matching other writes.
+  app.post("/registry/shape-descriptions", async (c) => {
+    try {
+      const body = await c.req.json<{ shape?: string; description?: string; source?: string }>()
+      const shape = typeof body.shape === "string" ? body.shape.trim() : ""
+      const description = typeof body.description === "string" ? body.description.trim() : ""
+      if (!shape || !description) {
+        return c.json({ error: "Missing required fields: shape, description" }, 400)
+      }
+      const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "auto"
+      const entry = registry.setLearnedDescription(shape, description, source)
+      if (!entry) {
+        return c.json({ error: "Invalid shape or description" }, 400)
+      }
+      return c.json({ success: true, shape, description: entry.description, source: entry.source }, 201)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json({ error: message }, 400)
+    }
+  })
+
   // Registry stats
   app.get("/registry/stats", (c) => {
     return c.json(registry.getStats())

@@ -50,10 +50,19 @@ export const PUBLIC_PATHS: readonly string[] = [
   "/health",
   "/shapes",
   "/registry/shapes",
-  "/registry/shape-descriptions",
   "/registry/stats",
   "/metrics",
   "/metrics/json"
+]
+
+/**
+ * Read-only endpoints that are public for GET but require auth for any
+ * mutating method. `/registry/shape-descriptions` is public to read (the
+ * planner fetches it unauthenticated) but POSTing a LEARNED description is a
+ * write and must carry an ApiKey, matching the other registry mutations.
+ */
+export const PUBLIC_GET_ONLY_PATHS: readonly string[] = [
+  "/registry/shape-descriptions",
 ]
 
 /** Path prefixes treated as public read-only (GET only). */
@@ -175,6 +184,7 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
   // If an Authorization header IS provided we still validate it so callers can
   // optionally authenticate on public paths.
   const isPublic = (PUBLIC_PATHS as string[]).includes(normalisedPath)
+    || (c.req.method === "GET" && (PUBLIC_GET_ONLY_PATHS as string[]).includes(normalisedPath))
     || (c.req.method === "GET" && (PUBLIC_PATH_PREFIXES as string[]).some(p => normalisedPath.startsWith(p)))
   const authHeader = c.req.header("Authorization")
 
