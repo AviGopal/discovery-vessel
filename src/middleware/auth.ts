@@ -50,6 +50,7 @@ export const PUBLIC_PATHS: readonly string[] = [
   "/health",
   "/shapes",
   "/registry/shapes",
+  "/registry/shape-descriptions",
   "/registry/stats",
   "/metrics",
   "/metrics/json"

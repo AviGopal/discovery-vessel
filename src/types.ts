@@ -99,6 +99,17 @@ export interface VesselRegistration {
   /** Impulse shapes this vessel can resolve */
   shapes: string[]
 
+  /**
+   * OPTIONAL per-shape one-line descriptions: shape id → "what it produces +
+   * when to use it". This is the resolver-DESCRIPTION advertisement (2026-06-28)
+   * that lets a decomposition planner MATCH a goal to ANY advertised resolver
+   * from its description alone, without a hand-written hint per resolver class.
+   * Co-located with the resolver: the vessel that OWNS a shape writes its
+   * description once, here. Backward-compatible — absent = today's id-only
+   * behaviour. Keys that aren't in `shapes` are ignored at read time.
+   */
+  shape_descriptions?: Record<string, string>
+
   /** Protocol for communication (defaults to http) */
   protocol?: "http" | "grpc" | "ws" | "unix"
 
@@ -348,6 +359,9 @@ export interface RegisterRequest {
   version: string
   endpoint: string
   shapes: string[]
+  /** OPTIONAL per-shape one-line descriptions (shape id → "produces + when to
+   *  use it"). Powers description-based planner matching. Backward-compatible. */
+  shape_descriptions?: Record<string, string>
   protocol?: string
   orgId?: string
   /** System vessels are accessible to all tenants regardless of orgId. */

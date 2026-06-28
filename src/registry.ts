@@ -32,6 +32,15 @@ export class VesselRegistry {
   /** orgId -> Set of vesselIds */
   private orgIndex = new Map<string, Set<string>>()
 
+  /**
+   * shape -> one-line description, merged across all live vessels.
+   * First-non-empty-writer wins per shape: once a vessel advertises a
+   * description for a shape, later registrations don't overwrite it unless the
+   * holder is gone (rebuilt from live vessels on each read so stale entries from
+   * expired/unregistered vessels are dropped). This is the resolver-DESCRIPTION
+   * catalogue a decomposition planner reads to match ANY advertised resolver.
+   */
+
   /** Cleanup interval handle */
   private cleanupInterval?: ReturnType<typeof setInterval>
 
@@ -317,6 +326,41 @@ export class VesselRegistry {
       if (reachable) accessible.push(shape)
     }
     return accessible
+  }
+
+  /**
+   * Get the merged shape→description map across all live vessels.
+   *
+   * Computed fresh from currently-registered, non-expired vessels (so an
+   * expired/unregistered vessel's descriptions disappear automatically).
+   * First-non-empty-writer wins per shape; only descriptions for shapes the
+   * vessel actually advertises in `shapes` are included (ignore stray keys).
+   *
+   * When `orgIds` is provided, only descriptions from vessels accessible to at
+   * least one of the given orgIds are returned (system vessels always included).
+   */
+  getShapeDescriptions(options?: { orgIds?: string[] }): Record<string, string> {
+    const orgIds = options?.orgIds
+    const merged: Record<string, string> = {}
+    for (const vessel of this.vessels.values()) {
+      if (this.isExpired(vessel)) continue
+      if (orgIds?.length) {
+        const reachable =
+          vessel.systemVessel === true ||
+          (vessel.orgId != null && orgIds.includes(vessel.orgId))
+        if (!reachable) continue
+      }
+      const descs = vessel.shape_descriptions
+      if (!descs) continue
+      const advertised = new Set(vessel.shapes)
+      for (const [shape, desc] of Object.entries(descs)) {
+        if (!advertised.has(shape)) continue // ignore stray keys not in `shapes`
+        if (typeof desc !== "string" || desc.trim().length === 0) continue
+        if (merged[shape]) continue // first-non-empty-writer wins
+        merged[shape] = desc.trim()
+      }
+    }
+    return merged
   }
 
   /**

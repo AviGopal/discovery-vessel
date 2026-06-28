@@ -162,6 +162,10 @@ export function createServer() {
         version: request.version ?? "unknown",
         endpoint: request.endpoint,
         shapes: request.shapes,
+        // Resolver-DESCRIPTION advertisement (2026-06-28): optional per-shape
+        // one-liners that let a decomposition planner match ANY advertised
+        // resolver from its description alone. Backward-compatible (absent = id-only).
+        shape_descriptions: request.shape_descriptions,
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | undefined,
         orgId,
         systemVessel: request.systemVessel,
@@ -289,6 +293,19 @@ export function createServer() {
     const orgIds = orgIdsParam ? orgIdsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined
     return c.json({
       shapes: registry.getShapes(orgIds ? { orgIds } : undefined)
+    })
+  })
+
+  // Merged shape→description catalogue across all live vessels.
+  // Resolver-DESCRIPTION advertisement (2026-06-28): a decomposition planner
+  // reads this to match a goal to ANY advertised resolver from its description
+  // alone — no hand-written per-resolver hint. Optional ?org_ids=id1,id2 scopes
+  // to descriptions from vessels accessible to those orgs.
+  app.get("/registry/shape-descriptions", (c) => {
+    const orgIdsParam = c.req.query("org_ids")
+    const orgIds = orgIdsParam ? orgIdsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined
+    return c.json({
+      shape_descriptions: registry.getShapeDescriptions(orgIds ? { orgIds } : undefined)
     })
   })
 
