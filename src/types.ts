@@ -110,8 +110,20 @@ export interface VesselRegistration {
    */
   shape_descriptions?: Record<string, string>
 
-  /** Protocol for communication (defaults to http) */
-  protocol?: "http" | "grpc" | "ws" | "unix"
+  /** Protocol for communication (defaults to http). "libp2p" = reachable over the
+   *  libp2p overlay (peerId/multiaddr below) rather than a plain http endpoint. */
+  protocol?: "http" | "grpc" | "ws" | "unix" | "libp2p"
+
+  // --- libp2p transport (federation reachability) ---------------------------
+  /** Stable libp2p PeerId (multihash of the vessel pubkey, seeded from vessel id).
+   *  Present when the vessel is reachable over the libp2p overlay. */
+  libp2p_peer_id?: string
+  /** libp2p multiaddr(s) the vessel is reachable at — typically a relay-circuit
+   *  address `/…/p2p/<relay>/p2p-circuit/p2p/<vessel>`. Callers dial these over the
+   *  overlay (NAT-traversed via relay + DCUtR). This is the field a caller needs to
+   *  reach a peer vessel; advertised here because discovery's capability response
+   *  does NOT echo `metadata`. */
+  libp2p_multiaddr?: string[]
 
   /** Organizational scope */
   orgId?: string
@@ -266,6 +278,11 @@ export interface VesselCapability {
   vesselName: string
   endpoint: string
   protocol?: string
+  /** libp2p transport (federation reachability) — present when the vessel advertised
+   *  a libp2p peerId/multiaddr at registration. Callers dial `libp2p_multiaddr` over
+   *  the overlay when the vessel isn't reachable at a plain http `endpoint`. */
+  libp2p_peer_id?: string
+  libp2p_multiaddr?: string[]
   confidence: number
   lastSeen: string
 
@@ -363,6 +380,9 @@ export interface RegisterRequest {
    *  use it"). Powers description-based planner matching. Backward-compatible. */
   shape_descriptions?: Record<string, string>
   protocol?: string
+  /** libp2p transport advertisement (federation reachability). */
+  libp2p_peer_id?: string
+  libp2p_multiaddr?: string[]
   orgId?: string
   /** System vessels are accessible to all tenants regardless of orgId. */
   systemVessel?: boolean

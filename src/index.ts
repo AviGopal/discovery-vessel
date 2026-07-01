@@ -166,7 +166,10 @@ export function createServer() {
         // one-liners that let a decomposition planner match ANY advertised
         // resolver from its description alone. Backward-compatible (absent = id-only).
         shape_descriptions: request.shape_descriptions,
-        protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | undefined,
+        protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | "libp2p" | undefined,
+        // libp2p transport advertisement (federation reachability).
+        libp2p_peer_id: request.libp2p_peer_id,
+        libp2p_multiaddr: request.libp2p_multiaddr,
         orgId,
         systemVessel: request.systemVessel,
         metadata: request.metadata,

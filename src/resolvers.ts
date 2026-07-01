@@ -39,6 +39,10 @@ export async function resolveVesselCapability(
       vesselName: v.vesselName,
       endpoint: v.endpoint,
       protocol: v.protocol,
+      // libp2p transport (federation reachability) — echo so callers can dial the
+      // peer over the overlay. (metadata is NOT echoed in capability responses.)
+      libp2p_peer_id: v.libp2p_peer_id,
+      libp2p_multiaddr: v.libp2p_multiaddr,
       confidence: 1.0,
       lastSeen: new Date(v.lastHeartbeat).toISOString(),
       // Resolve contract (Wave 1A) — already normalized at registration time.
