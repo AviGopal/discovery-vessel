@@ -136,6 +136,15 @@ export interface VesselRegistration {
    */
   systemVessel?: boolean
 
+  /**
+   * Optional host/LAN-reachable URL for callers OUTSIDE the substrate's
+   * container network (e.g. metabob-mcp on the operator host). `endpoint`
+   * remains the substrate-internal URL; external consumers prefer
+   * `public_endpoint` when present. Stored and echoed verbatim; absent means
+   * no behavior change (2026-07-02, cross-host attach contract).
+   */
+  public_endpoint?: string
+
   // --- Resolve contract (Wave 1A) -------------------------------------------
   /** HTTP path appended to `endpoint` when resolving impulses. */
   resolve_endpoint: string
@@ -286,6 +295,9 @@ export interface VesselCapability {
   confidence: number
   lastSeen: string
 
+  /** Optional host/LAN-reachable URL advertised by the vessel (see registration). */
+  public_endpoint?: string
+
   // --- Resolve contract (Wave 1A) -------------------------------------------
   /** HTTP path appended to `endpoint` when resolving impulses. */
   resolve_endpoint: string
@@ -391,6 +403,9 @@ export interface RegisterRequest {
     accessLevel: "read-write" | "read-only" | "none"
     modifiableBy?: string
   }
+
+  /** Optional host/LAN-reachable URL for callers outside the substrate network. */
+  public_endpoint?: string
 
   // --- Resolve contract (Wave 1A, all optional) -----------------------------
   /** HTTP path appended to `endpoint` when resolving impulses.

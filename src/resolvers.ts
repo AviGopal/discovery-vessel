@@ -38,6 +38,7 @@ export async function resolveVesselCapability(
       vesselId: v.vesselId,
       vesselName: v.vesselName,
       endpoint: v.endpoint,
+      public_endpoint: v.public_endpoint,
       protocol: v.protocol,
       // libp2p transport (federation reachability) — echo so callers can dial the
       // peer over the overlay. (metadata is NOT echoed in capability responses.)
