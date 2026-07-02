@@ -161,6 +161,10 @@ export function createServer() {
         vesselName: request.vesselName ?? request.vesselId,
         version: request.version ?? "unknown",
         endpoint: request.endpoint,
+        // Optional host/LAN-reachable URL (cross-host attach contract,
+        // 2026-07-02) — without this passthrough the handler's explicit field
+        // list silently dropped the body field before registry.register().
+        public_endpoint: request.public_endpoint,
         shapes: request.shapes,
         // Resolver-DESCRIPTION advertisement (2026-06-28): optional per-shape
         // one-liners that let a decomposition planner match ANY advertised
