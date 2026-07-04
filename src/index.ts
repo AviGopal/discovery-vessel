@@ -165,6 +165,11 @@ export function createServer() {
         // 2026-07-02) — without this passthrough the handler's explicit field
         // list silently dropped the body field before registry.register().
         public_endpoint: request.public_endpoint,
+        // Advisory H2 identity proof-of-possession passthrough (recorded, never enforced).
+        pubkey: request.pubkey,
+        identity_signature: request.identity_signature,
+        identity_nonce: request.identity_nonce,
+        identity_signed_at: request.identity_signed_at,
         shapes: request.shapes,
         // Resolver-DESCRIPTION advertisement (2026-06-28): optional per-shape
         // one-liners that let a decomposition planner match ANY advertised

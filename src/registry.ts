@@ -5,6 +5,7 @@
  * This is where the discovery data lives - discovery vessel resolves it.
  */
 
+import { createHash, createPublicKey, verify } from "node:crypto"
 import type { VesselRegistration } from "./types"
 import {
   DEFAULT_RESOLVE_ENDPOINT,
@@ -78,6 +79,28 @@ export class VesselRegistry {
    * NOT automatically public — they are only visible in unscoped queries
    * (i.e. when no `orgId` filter is provided by the caller).
    */
+  /**
+   * Advisory H2 identity status; signature verification fills in next.
+   */
+  private computeIdentityStatus(
+    registration: { pubkey?: string; identity_signature?: string; identity_nonce?: string; identity_signed_at?: number; vesselId: string },
+    existing?: VesselRegistration,
+  ): "verified" | "unverified" | "mismatch" {
+    if (!registration.pubkey) return "unverified";
+    if (existing?.pubkey && existing.pubkey !== registration.pubkey) return "mismatch";
+    if (!registration.identity_signature || !registration.identity_nonce || typeof registration.identity_signed_at !== "number") return "unverified";
+    try {
+      const raw = Buffer.from(registration.pubkey, "base64");
+      const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), raw]);
+      const key = createPublicKey({ key: spki, format: "der", type: "spki" });
+      const payload = Buffer.from(JSON.stringify({ vesselId: registration.vesselId, identity_signed_at: registration.identity_signed_at, identity_nonce: registration.identity_nonce }));
+      const sig = Buffer.from(registration.identity_signature, "base64");
+      return verify(null, payload, key, sig) ? "verified" : "mismatch";
+    } catch {
+      return "mismatch";
+    }
+  }
+
   private isAccessibleTo(vessel: VesselRegistration, orgId: string): boolean {
     return vessel.systemVessel === true || vessel.orgId === orgId
   }
@@ -148,7 +171,9 @@ export class VesselRegistry {
       registeredAt: existing?.registeredAt ?? startTime,
       lastHeartbeat: startTime,
       expiresAt: startTime + DEFAULT_TTL_MS,
-      status: "healthy"
+      status: "healthy",
+      pubkey_hash: registration.pubkey ? createHash("sha256").update(Buffer.from(registration.pubkey, "base64")).digest("base64url") : undefined,
+      identity_status: this.computeIdentityStatus(registration, existing),
     }
 
     // Remove from old indexes if re-registering with different shapes

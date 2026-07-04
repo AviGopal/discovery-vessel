@@ -91,6 +91,18 @@ export interface AuthContext {
  * Vessel registration record - what a vessel advertises about itself
  */
 export interface VesselRegistration {
+  /** Advisory (recorded, never enforced) proof-of-possession: base64-encoded Ed25519 public key (32 bytes raw). */
+  pubkey?: string
+  /** Advisory proof-of-possession: base64 Ed25519 signature over canonical JSON of {vesselId, identity_signed_at, identity_nonce}. */
+  identity_signature?: string
+  /** Advisory proof-of-possession: nonce used in the identity signature payload. */
+  identity_nonce?: string
+  /** Advisory proof-of-possession: unix ms timestamp used in the identity signature payload. */
+  identity_signed_at?: number
+  /** Registry-computed advisory field: base64url SHA-256 of the raw pubkey bytes. */
+  pubkey_hash?: string
+  /** Registry-computed advisory identity status: verified = signature checked OK, unverified = no signature provided, mismatch = signature check failed. */
+  identity_status?: "verified" | "unverified" | "mismatch"
   vesselId: string
   vesselName: string
   version: string
@@ -383,6 +395,14 @@ export interface ResolveResponse {
 }
 
 export interface RegisterRequest {
+  /** Advisory (recorded, never enforced) proof-of-possession: base64-encoded Ed25519 public key (32 bytes raw). */
+  pubkey?: string
+  /** Advisory proof-of-possession: base64 Ed25519 signature over canonical JSON of {vesselId, identity_signed_at, identity_nonce}. */
+  identity_signature?: string
+  /** Advisory proof-of-possession: nonce used in the identity signature payload. */
+  identity_nonce?: string
+  /** Advisory proof-of-possession: unix ms timestamp used in the identity signature payload. */
+  identity_signed_at?: number
   vesselId: string
   vesselName: string
   version: string
