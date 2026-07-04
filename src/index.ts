@@ -255,6 +255,8 @@ export function createServer() {
       resolve_endpoint: vessel.resolve_endpoint,
       shapes: vessel.shapes,
       version: vessel.version,
+      pubkey_hash: vessel.pubkey_hash,
+      identity_status: vessel.identity_status,
     })
   })
 
