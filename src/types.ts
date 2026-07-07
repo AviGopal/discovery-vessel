@@ -363,6 +363,8 @@ export interface VesselRegistryResult {
     vesselName: string
     shapes: string[]
     endpoint: string
+    resolve_endpoint?: string
+    resolve_request_format?: string
     protocol?: string
     status: string
     lastSeen: string

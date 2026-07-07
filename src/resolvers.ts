@@ -166,6 +166,8 @@ export async function resolveVesselRegistry(
       shapes: v.shapes,
       endpoint: v.endpoint,
       protocol: v.protocol,
+      resolve_endpoint: v.resolve_endpoint,
+      resolve_request_format: v.resolve_request_format,
       status: v.status ?? "unknown",
       lastSeen: new Date(v.lastHeartbeat).toISOString(),
       metadata: v.metadata
