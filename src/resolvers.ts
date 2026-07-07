@@ -21,6 +21,37 @@ import type {
 } from "./types"
 
 /**
+ * Substrate host-mapping convention: an in-container service port `8xxx` is
+ * published to the operator host at `8xxx + OFFSET` (docker `-p 1{8xxx}:8xxx`,
+ * default offset 10000). Encoded here in ONE place so external (host) callers —
+ * e.g. the operator's Obsidian vessel or metabob-mcp — can reach in-container
+ * vessels purely by resolving shapes through discovery, never by hardcoding
+ * endpoints. Set DISCOVERY_PUBLIC_PORT_OFFSET=0 to disable derivation.
+ */
+const PUBLIC_PORT_OFFSET = parseInt(process.env.DISCOVERY_PUBLIC_PORT_OFFSET ?? "10000", 10);
+
+/**
+ * Derive a host-reachable public_endpoint from an in-container endpoint when the
+ * vessel did not advertise one explicitly. Only rewrites loopback endpoints
+ * (localhost / 127.0.0.1) with a container service port in [8000, 9000); other
+ * endpoints (real hosts, host.docker.internal, non-service ports) are left as-is
+ * (returns undefined → caller keeps the explicit value, which is `undefined`).
+ * An explicitly-registered public_endpoint always wins.
+ */
+export function derivePublicEndpoint(
+  endpoint: string | undefined,
+  explicit: string | undefined,
+): string | undefined {
+  if (explicit) return explicit;
+  if (!endpoint || !PUBLIC_PORT_OFFSET) return explicit;
+  const m = endpoint.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:)(\d+)(.*)$/);
+  if (!m) return undefined;
+  const port = parseInt(m[4], 10);
+  if (!(port >= 8000 && port < 9000)) return undefined;
+  return `${m[1]}${m[2]}${m[3]}${port + PUBLIC_PORT_OFFSET}${m[5]}`;
+}
+
+/**
  * Resolve a vesselCapability impulse
  * Returns which vessels can resolve a specific shape
  */
@@ -38,7 +69,7 @@ export async function resolveVesselCapability(
       vesselId: v.vesselId,
       vesselName: v.vesselName,
       endpoint: v.endpoint,
-      public_endpoint: v.public_endpoint,
+      public_endpoint: derivePublicEndpoint(v.endpoint, v.public_endpoint),
       protocol: v.protocol,
       // libp2p transport (federation reachability) — echo so callers can dial the
       // peer over the overlay. (metadata is NOT echoed in capability responses.)
