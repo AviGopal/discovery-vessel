@@ -46,7 +46,7 @@ export function derivePublicEndpoint(
   if (!endpoint || !PUBLIC_PORT_OFFSET) return explicit;
   const m = endpoint.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:)(\d+)(.*)$/);
   if (!m) return undefined;
-  const port = parseInt(m[4], 10);
+  const port = parseInt(m[4] ?? "", 10);
   if (!(port >= 8000 && port < 9000)) return undefined;
   return `${m[1]}${m[2]}${m[3]}${port + PUBLIC_PORT_OFFSET}${m[5]}`;
 }
