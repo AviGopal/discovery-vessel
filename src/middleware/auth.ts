@@ -77,6 +77,17 @@ export const PUBLIC_PATH_PREFIXES: readonly string[] = [
 const IDENTITY_VESSEL_URL =
   process.env.IDENTITY_VESSEL_URL ?? "https://identity.metabob.com"
 
+// Short-TTL validation cache: discovery sits on every vessel's register/
+// heartbeat path, so a fresh HTTP validation per request turns identity-vessel
+// latency into fleet-wide 401 churn (timeouts read as revoked keys). A
+// recently-validated key stays valid for the TTL without a round-trip; when
+// identity is slow or unreachable a previously-valid key is served from cache
+// for a bounded grace window (graceful degradation for KNOWN keys — unknown
+// keys still fail closed, and a definitive rejection evicts the cache entry).
+const VALIDATION_TTL_MS = 60_000
+const VALIDATION_GRACE_MS = 600_000
+const validationCache = new Map<string, { ctx: AuthContext; at: number }>()
+
 /**
  * Default identity validator — calls identity-vessel POST /v1/auth/resolve.
  *
@@ -86,6 +97,11 @@ const IDENTITY_VESSEL_URL =
  * /v1/auth/resolve accepts correctly.
  */
 async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | null> {
+  const now = Date.now()
+  const cached = validationCache.get(apiKey)
+  if (cached && now - cached.at < VALIDATION_TTL_MS) {
+    return cached.ctx
+  }
   try {
     const res = await fetch(`${IDENTITY_VESSEL_URL}/v1/auth/resolve`, {
       method: "POST",
@@ -103,22 +119,30 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     })
 
     if (!res.ok) {
+      validationCache.delete(apiKey)
       return null
     }
 
     const data = (await res.json()) as IdentityResolveResponse
     if (!data.success || !data.data?.authenticated) {
+      validationCache.delete(apiKey)
       return null
     }
 
-    return {
+    const ctx: AuthContext = {
       orgId: data.data.orgId,
       userId: data.data.userId,
       keyId: data.data.keyId,
       scopes: data.data.scopes
     }
+    validationCache.set(apiKey, { ctx, at: now })
+    return ctx
   } catch {
-    // Network error or timeout — treat as auth failure
+    // Identity slow/unreachable — serve a known-good key within the grace
+    // window rather than churning the registry; unknown keys fail closed.
+    if (cached && now - cached.at < VALIDATION_GRACE_MS) {
+      return cached.ctx
+    }
     return null
   }
 }
