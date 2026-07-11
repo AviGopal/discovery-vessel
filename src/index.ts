@@ -41,6 +41,7 @@ const startTime = Date.now()
 const PEER_DISCOVERY_ENDPOINTS = (process.env.PEER_DISCOVERY_ENDPOINTS ?? "")
   .split(",").map((s) => s.trim()).filter(Boolean)
 const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "1", 10)
+const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "fallback").toLowerCase()
 
 async function forwardToPeers(
   pointer: DiscoveryPointer,
@@ -115,12 +116,29 @@ export function createServer() {
       // is set, so single-substrate behaviour is unchanged.
       if (pointer.type === "vesselCapability") {
         const cap = content as { vessels?: Array<Record<string, unknown>>; found?: boolean }
-        if (!cap.vessels || cap.vessels.length === 0) {
+        if (!cap.vessels || cap.vessels.length === 0 || PEER_FANOUT_MODE === "union") {
           const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
           const peerVessels = await forwardToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
           if (peerVessels.length > 0) {
-            cap.vessels = [...(cap.vessels ?? []), ...peerVessels]
-            cap.found = true
+            // Union merge: peer rows must be dialable from here (a libp2p circuit
+            // multiaddr, or a non-loopback endpoint), must not be this substrate's own
+            // rows echoed back through the hub (libp2p_peer_id matching a locally
+            // registered vessel), and local rows win on vesselId collision.
+            const localIds = new Set((cap.vessels ?? []).map((v) => String(v.vesselId ?? "")))
+            const localPeerIds = new Set(
+              registry.list().map((v) => String((v as unknown as Record<string, unknown>).libp2p_peer_id ?? "")).filter(Boolean),
+            )
+            const usable = peerVessels.filter((v) => {
+              const ma = v.libp2p_multiaddr
+              const dialable = (Array.isArray(ma) && ma.length > 0)
+                || !/127\.0\.0\.1|localhost/.test(String(v.endpoint ?? ""))
+              const selfEcho = localPeerIds.has(String(v.libp2p_peer_id ?? ""))
+              return dialable && !selfEcho && !localIds.has(String(v.vesselId ?? ""))
+            })
+            if (usable.length > 0) {
+              cap.vessels = [...(cap.vessels ?? []), ...usable]
+              cap.found = true
+            }
           }
         }
       }
