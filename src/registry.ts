@@ -34,6 +34,59 @@ export class VesselRegistry {
   private orgIndex = new Map<string, Set<string>>()
 
   /**
+   * Deduplicate registered vessels by their underlying physical identity.
+   * Identity key: libp2p_peer_id if present, else the first circuit multiaddr
+   * component, else null (no dedup applied for rows without either).
+   * When two rows share a key, the one with the larger lastSeen value (ms epoch)
+   * is kept; the staler row's vesselId is removed from all indexes and the map.
+   */
+  private deduplicateByPeerIdentity(incomingId: string): void {
+    const incoming = this.vessels.get(incomingId)
+    if (!incoming) return
+
+    const incomingRaw = incoming as unknown as Record<string, unknown>
+    const incomingPeerId = typeof incomingRaw["libp2p_peer_id"] === "string"
+      ? (incomingRaw["libp2p_peer_id"] as string)
+      : null
+    const incomingMaArr = incomingRaw["libp2p_multiaddr"]
+    const incomingMa = Array.isArray(incomingMaArr) && (incomingMaArr as string[]).length > 0
+      ? (incomingMaArr as string[])[0] ?? null
+      : null
+    const incomingKey = incomingPeerId ?? incomingMa
+    if (!incomingKey) return
+
+    for (const [existingId, existing] of this.vessels.entries()) {
+      if (existingId === incomingId) continue
+      const existingRaw = existing as unknown as Record<string, unknown>
+      const existingPeerId = typeof existingRaw["libp2p_peer_id"] === "string"
+        ? (existingRaw["libp2p_peer_id"] as string)
+        : null
+      const existingMaArr = existingRaw["libp2p_multiaddr"]
+      const existingMa = Array.isArray(existingMaArr) && (existingMaArr as string[]).length > 0
+        ? (existingMaArr as string[])[0] ?? null
+        : null
+      const existingKey = existingPeerId ?? existingMa
+      if (existingKey !== incomingKey) continue
+
+      // Same physical peer — keep the row with the larger lastSeen; evict the other.
+      const incomingLastSeen = typeof incomingRaw["lastSeen"] === "number"
+        ? (incomingRaw["lastSeen"] as number)
+        : (incoming.registeredAt ?? 0)
+      const existingLastSeen = typeof existingRaw["lastSeen"] === "number"
+        ? (existingRaw["lastSeen"] as number)
+        : (existing.registeredAt ?? 0)
+
+      const evictId = incomingLastSeen >= existingLastSeen ? existingId : incomingId
+      this.vessels.delete(evictId)
+      for (const ids of this.shapeIndex.values()) ids.delete(evictId)
+      for (const ids of this.orgIndex.values()) ids.delete(evictId)
+      // Only one duplicate can exist per incoming registration; stop after first eviction.
+      if (evictId === incomingId) return
+      break
+    }
+  }
+
+  /**
    * shape -> one-line description, merged across all live vessels.
    * First-non-empty-writer wins per shape: once a vessel advertises a
    * description for a shape, later registrations don't overwrite it unless the
@@ -218,6 +271,8 @@ export class VesselRegistry {
       ttl_seconds: Math.round(DEFAULT_TTL_MS / 1000),
       is_reregistration: existing !== undefined,
     })
+
+    this.deduplicateByPeerIdentity(registration.vesselId)
 
     return record
   }

@@ -103,10 +103,40 @@ export function createServer() {
   // Resolve discovery impulses
   app.post("/resolve", async (c) => {
     try {
-      const { pointer } = await c.req.json<ResolveRequest>()
+      const body = await c.req.json<ResolveRequest>()
+      const pointer = (body.pointer) as ResolveRequest["pointer"]
 
       if (!pointer || !pointer.type) {
         return c.json({ error: "Missing pointer or pointer.type" }, 400)
+      }
+
+      const DISCOVERY_SHAPES = ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry"]
+      if (!DISCOVERY_SHAPES.includes(pointer.type)) {
+        const auth = getAuthContextOptional(c)
+        const candidates = registry.findByShape(pointer.type, auth?.orgId ? { orgId: auth.orgId } : undefined).filter((v) => v.status === "healthy")
+        if (candidates.length === 0) {
+          return c.json({ error: "Not found", shape: pointer.type }, 404)
+        }
+        const target = candidates[0]!
+        const endpoint = target.endpoint
+        const resolveEndpoint = target.resolve_endpoint ?? "/v2/impulses/resolve"
+        const timeoutMs = target.resolve_timeout_ms ?? 10000
+        const forwardUrl = /^https?:\/\//.test(resolveEndpoint) ? resolveEndpoint : `${endpoint}${resolveEndpoint}`
+        try {
+          const fwd = await fetch(forwardUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(c.req.header("Authorization") ? { Authorization: c.req.header("Authorization")! } : {}),
+            },
+            body: JSON.stringify({ impulse: { pointer } }),
+            signal: AbortSignal.timeout(timeoutMs),
+          })
+          const fwdBody = await fwd.json()
+          return c.json(fwdBody, fwd.status as 200)
+        } catch (err) {
+          return c.json({ error: "forward_failed", shape: pointer.type, detail: (err as Error).message }, 502)
+        }
       }
 
       const content = await resolve(pointer as DiscoveryPointer)
