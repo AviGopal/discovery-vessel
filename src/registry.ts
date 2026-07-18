@@ -34,11 +34,16 @@ export class VesselRegistry {
   private orgIndex = new Map<string, Set<string>>()
 
   /**
-   * Deduplicate registered vessels by their underlying physical identity.
-   * Identity key: libp2p_peer_id if present, else the first circuit multiaddr
-   * component, else null (no dedup applied for rows without either).
-   * When two rows share a key, the one with the larger lastSeen value (ms epoch)
-   * is kept; the staler row's vesselId is removed from all indexes and the map.
+   * Deduplicate re-registrations of the SAME logical vessel by physical identity.
+   * Identity key: (libp2p_peer_id if present, else the first circuit multiaddr)
+   * PLUS the base logical name (vesselId with any "@<substrate>" qualifier
+   * stripped). The peer key alone is NOT sufficient: a federation transport
+   * mirrors every vessel of its substrate as `<vesselId>@<substrate>` rows that
+   * all legitimately share the one transport peer — distinct base names behind
+   * one peer must coexist (the per-vessel mirror contract). Same base name +
+   * same peer = a duplicate registration (gap b5935989): the row with the larger
+   * lastSeen wins and the staler row is evicted — recorded via a deregistration
+   * metric and a vessel.expired bus event so the eviction is observable.
    */
   private deduplicateByPeerIdentity(incomingId: string): void {
     const incoming = this.vessels.get(incomingId)
@@ -54,6 +59,8 @@ export class VesselRegistry {
       : null
     const incomingKey = incomingPeerId ?? incomingMa
     if (!incomingKey) return
+    const baseName = (id: string): string => id.split("@")[0] ?? id
+    const incomingBase = baseName(incomingId)
 
     for (const [existingId, existing] of this.vessels.entries()) {
       if (existingId === incomingId) continue
@@ -67,6 +74,8 @@ export class VesselRegistry {
         : null
       const existingKey = existingPeerId ?? existingMa
       if (existingKey !== incomingKey) continue
+      // Distinct logical vessels sharing a transport peer are NOT duplicates.
+      if (baseName(existingId) !== incomingBase) continue
 
       // Same physical peer — keep the row with the larger lastSeen; evict the other.
       const incomingLastSeen = typeof incomingRaw["lastSeen"] === "number"
@@ -80,6 +89,8 @@ export class VesselRegistry {
       this.vessels.delete(evictId)
       for (const ids of this.shapeIndex.values()) ids.delete(evictId)
       for (const ids of this.orgIndex.values()) ids.delete(evictId)
+      discoveryMetrics.recordDeregistration(evictId, "peer_dedup")
+      publishVesselEvent("vessel.expired", { vessel_id: evictId, reason: "peer_dedup" })
       // Only one duplicate can exist per incoming registration; stop after first eviction.
       if (evictId === incomingId) return
       break

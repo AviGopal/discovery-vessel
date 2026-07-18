@@ -323,7 +323,7 @@ export class DiscoveryMetrics {
   /**
    * Record a vessel deregistration
    */
-  recordDeregistration(vesselId: string, reason: 'manual' | 'expired' | 'error' = 'manual') {
+  recordDeregistration(vesselId: string, reason: 'manual' | 'expired' | 'error' | 'peer_dedup' = 'manual') {
     metricsRegistry.inc('vessel_deregistration_total', 1, {
       vessel_id: vesselId,
       reason
