@@ -94,19 +94,57 @@ Health check endpoint.
 curl http://localhost:8080/health
 ```
 
-## Integration with Other Vessels
+### GET /bootstrap
 
-### How Vessels Find Discovery Vessel (Bootstrap)
-
-Discovery vessel is found via static configuration:
+The single public (pre-auth) read a client needs to **point-and-go**. A vessel or
+spoke pointed at a discovery endpoint fetches `/bootstrap` and learns the relay
+anchor, identity authority, and canonical discovery endpoint — everything it needs
+to join the overlay. No API key is required for this route (a fresh client can read
+it before it holds a key); the response carries only non-secret routing anchors.
 
 ```bash
-# Environment variable (recommended)
-DISCOVERY_VESSEL_ENDPOINT=http://discovery.activity-system.svc.cluster.local:8080
-
-# Or fixed DNS in Kubernetes
-discovery.activity-system.svc.cluster.local
+curl <discovery-endpoint>/bootstrap
 ```
+
+Response:
+```json
+{
+  "relay_multiaddrs": ["<relay-multiaddr>"],
+  "identity_endpoint": "<identity-endpoint>",
+  "discovery_endpoint": "<discovery-endpoint>",
+  "prefer_transport": "libp2p"
+}
+```
+
+- `relay_multiaddrs` comes from the `RELAY_MULTIADDR` env when set; when unset it is
+  **derived** from the registered circuit multiaddrs, so bootstrap works even if this
+  process was never handed a relay directly.
+- `identity_endpoint` / `discovery_endpoint` are the public anchors, resolved from the
+  public-URL / public-IP env vars (see [Environment Variables](#environment-variables)).
+- `prefer_transport: "libp2p"` tells the client to reserve a circuit on the relay and
+  dial vessels over the overlay, falling back to direct HTTP only when no circuit exists.
+
+## Integration with Other Vessels
+
+### The Point-and-Go Door
+
+Discovery is the single door a client points at to join a substrate: a client/spoke
+supplies **`<discovery-endpoint>` + `<api-key>` and nothing else**. It fetches
+`<discovery-endpoint>/bootstrap`, takes the relay anchor, reserves a p2p circuit
+(preferring the libp2p overlay), and registers itself. A valid API key is the sole
+gate; the relay, identity authority, and discovery endpoint are all read from
+`/bootstrap` at use time.
+
+The federation transport / obsidian sidecar performs this automatically when no relay
+is configured. A hand-set `RELAY_MULTIADDR` is now an **optional override** — it used
+to go stale on every relay restart (the pinned relay peer-id drifted), which is exactly
+the failure `/bootstrap` fixes by serving the current anchor on demand.
+
+> Note: this "point-and-go" door is the `GET /bootstrap` route above — not to be
+> confused with statically locating discovery itself. When a client already knows a
+> fixed discovery address (e.g. a `DISCOVERY_VESSEL_ENDPOINT` env var or a fixed DNS
+> name like `discovery.activity-system.svc.cluster.local`), it points there and reads
+> everything else from `/bootstrap`.
 
 ### How MiniBob Uses Discovery
 
@@ -185,6 +223,7 @@ setInterval(async () => {
 │  │  POST /register   - Register vessel capabilities          │  │
 │  │  POST /heartbeat  - Extend registration TTL               │  │
 │  │  GET  /health     - Health check                          │  │
+│  │  GET  /bootstrap  - Public point-and-go anchors           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -208,6 +247,21 @@ This means discovery vessel can be discovered through itself (meta!).
 | `DISCOVERY_HOST` | `0.0.0.0` | Server bind address |
 | `DISCOVERY_VESSEL_ID` | `discovery-vessel` | ID for self-registration |
 | `DISCOVERY_SELF_ENDPOINT` | `http://localhost:8080` | Endpoint for self-registration |
+
+The following are read only by `GET /bootstrap` to advertise the public join anchors.
+All are optional and bootstrap-only (law 1: frozen at process start, they configure
+what `/bootstrap` returns, they do not steer runtime behavior). When unset, the relay
+list is derived from registered circuit multiaddrs.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RELAY_MULTIADDR` | (derived) | Comma-separated relay multiaddr override; when unset, derived from registered circuit multiaddrs |
+| `PUBLIC_IP` / `FED_PUBLIC_IP` | (unset) | Public IP used to compose identity/discovery anchors when explicit public URLs are absent |
+| `IDENTITY_PUBLIC_URL` | (unset) | Explicit public identity-vessel URL returned as `identity_endpoint` |
+| `IDENTITY_PUBLIC_PORT` | `18101` | Port paired with `PUBLIC_IP` to compose the identity anchor |
+| `IDENTITY_VESSEL_URL` | (unset) | Fallback identity URL (also used by auth middleware) |
+| `DISCOVERY_PUBLIC_URL` | (unset) | Explicit public discovery URL returned as `discovery_endpoint` |
+| `DISCOVERY_PUBLIC_PORT` | `18100` | Port paired with `PUBLIC_IP` to compose the discovery anchor |
 
 ## TTL and Expiration
 

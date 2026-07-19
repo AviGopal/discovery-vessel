@@ -48,6 +48,9 @@ export type IdentityValidator = (apiKey: string) => Promise<AuthContext | null>
 
 export const PUBLIC_PATHS: readonly string[] = [
   "/health",
+  // Public by design (point-and-go join): /bootstrap returns only non-secret
+  // routing anchors (relay / identity / discovery) a client needs BEFORE it
+  // holds a key. Do not remove — keyless bootstrap breaks without this entry.
   "/bootstrap",
   "/shapes",
   "/registry/shapes",

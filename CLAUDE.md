@@ -8,6 +8,14 @@ Discovery-vessel resolves discovery-related impulse types. It's not special infr
 
 **Core principle**: Resolvers live where data lives.
 
+**Point-and-go door**: discovery is also the single federation door. It serves a
+public (pre-auth) `GET /bootstrap` returning the relay anchor, identity authority, and
+canonical discovery endpoint (`{relay_multiaddrs, identity_endpoint, discovery_endpoint,
+prefer_transport: "libp2p"}`), so a client/spoke joins with only `<discovery-endpoint>`
++ `<api-key>` — everything else is read from `/bootstrap` at use time, not pinned in
+env. The handler lives in `src/index.ts`; the route is exempted from auth via
+`PUBLIC_PATHS` in `src/middleware/auth.ts`.
+
 ## Quick Reference
 
 ```bash
@@ -35,6 +43,16 @@ bun run typecheck    # Type check
 | `vesselEndpoint` | Get vessel URL |
 | `vesselHealth` | Check vessel status |
 | `vesselRegistry` | List all vessels |
+
+## HTTP Routes
+
+| Route | Auth | Purpose |
+|-------|------|---------|
+| `POST /resolve` | required | Resolve a discovery impulse |
+| `POST /register` | required | Register vessel capabilities |
+| `POST /heartbeat` | required | Extend registration TTL |
+| `GET /health` | public | Health check |
+| `GET /bootstrap` | public | Point-and-go anchors (relay + identity + discovery) |
 
 ## Key Behaviors
 

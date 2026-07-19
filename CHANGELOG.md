@@ -2,6 +2,23 @@
 
 All notable changes to discovery-vessel.
 
+## [0.5.0] - 2026-07-19
+
+### Added
+- Public (pre-auth) `GET /bootstrap` — the single point-and-go door for federation. It
+  returns `{relay_multiaddrs, identity_endpoint, discovery_endpoint, prefer_transport}`
+  so a client/spoke joins a substrate with only a discovery endpoint plus an API key;
+  the relay anchor, identity authority, and discovery endpoint are read here at use time
+  instead of being pinned in env. `relay_multiaddrs` comes from `RELAY_MULTIADDR` when
+  set, and is otherwise derived from the registered circuit multiaddrs. This supersedes
+  the hand-set relay multiaddr, whose pinned relay peer-id went stale on every relay
+  restart — a hand-set relay is now an optional override.
+
+### Security
+- `/bootstrap` is an intentional new `PUBLIC_PATHS` entry: it is auth-exempt so a fresh
+  keyless client can read the join anchors before it holds a key. Its response contains
+  only non-secret routing anchors (relay/identity/discovery addresses), no credentials.
+
 ## [0.4.1] - 2026-05-03
 
 ### Fixed
