@@ -48,6 +48,7 @@ export type IdentityValidator = (apiKey: string) => Promise<AuthContext | null>
 
 export const PUBLIC_PATHS: readonly string[] = [
   "/health",
+  "/bootstrap",
   "/shapes",
   "/registry/shapes",
   "/registry/stats",

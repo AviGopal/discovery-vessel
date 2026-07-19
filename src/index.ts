@@ -100,6 +100,45 @@ export function createServer() {
     return c.json(response)
   })
 
+  // Bootstrap: the ONE public read a client needs to "just point and go".
+  // A vessel/client pointed at this discovery (plus an API key for everything
+  // else it does) reads the relay anchor + identity authority here, then dials
+  // the p2p overlay — no out-of-band RELAY_MULTIADDR env, no stale-peerId drift
+  // (law 1: the relay is a value read at use time, not frozen at bootstrap).
+  // Public (pre-auth) so a fresh client can reach it before it holds a key.
+  app.get("/bootstrap", (c) => {
+    const relayEnv = (process.env.RELAY_MULTIADDR ?? "")
+      .split(",").map((s) => s.trim()).filter(Boolean)
+    // Fallback: derive the relay anchor from any registered circuit multiaddr
+    // (/…/p2p/<relay>/p2p-circuit/p2p/<vessel>) so bootstrap works even if this
+    // process was not handed RELAY_MULTIADDR directly.
+    const relayFromCircuits = relayEnv.length ? [] : Array.from(new Set(
+      registry.list()
+        .flatMap((v) => v.libp2p_multiaddr ?? [])
+        .map((ma) => { const i = ma.indexOf("/p2p-circuit"); return i > 0 ? ma.slice(0, i) : ""; })
+        .filter(Boolean)
+    ))
+    const relay_multiaddrs = relayEnv.length ? relayEnv : relayFromCircuits
+    const publicIp = process.env.PUBLIC_IP ?? process.env.FED_PUBLIC_IP ?? ""
+    const identity_endpoint =
+      process.env.IDENTITY_PUBLIC_URL ??
+      (publicIp ? `http://${publicIp}:${process.env.IDENTITY_PUBLIC_PORT ?? "18101"}` : undefined) ??
+      process.env.IDENTITY_VESSEL_URL ??
+      ""
+    const discovery_endpoint =
+      process.env.DISCOVERY_PUBLIC_URL ??
+      (publicIp ? `http://${publicIp}:${process.env.DISCOVERY_PUBLIC_PORT ?? "18100"}` : undefined) ??
+      ""
+    return c.json({
+      relay_multiaddrs,
+      identity_endpoint,
+      discovery_endpoint,
+      // A client SHOULD reserve a circuit on the relay and dial vessels via their
+      // libp2p_multiaddr, falling back to direct HTTP only when no circuit exists.
+      prefer_transport: "libp2p",
+    })
+  })
+
   // Resolve discovery impulses
   app.post("/resolve", async (c) => {
     try {
