@@ -38,20 +38,26 @@ const startTime = Date.now()
 // SAFE BY DEFAULT: PEER_DISCOVERY_ENDPOINTS empty → no forwarding → behaviour
 // byte-identical to before (a true no-op cutover). The X-Discovery-Depth header is
 // a strict hop limit so peer→peer→peer can't loop or fan out unbounded (MAX_PEER_DEPTH).
-const PEER_DISCOVERY_ENDPOINTS = (process.env.PEER_DISCOVERY_ENDPOINTS ?? "")
-  .split(",").map((s) => s.trim()).filter(Boolean)
-const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "1", 10)
-const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "fallback").toLowerCase()
+// Peer set is read at USE TIME (law 1): a spoke federated AFTER boot (its
+// PEER_DISCOVERY_ENDPOINTS set post-start) still fans out, because nothing is
+// frozen at module load. Depth/fanout-mode remain bootstrap limits.
+function currentPeerEndpoints(): string[] {
+  return (process.env.PEER_DISCOVERY_ENDPOINTS ?? "")
+    .split(",").map((s) => s.trim()).filter(Boolean)
+}
+const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "2", 10)
+const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "union").toLowerCase()
 
 async function forwardToPeers(
   pointer: DiscoveryPointer,
   depth: number,
   authHeader: string | undefined,
 ): Promise<Array<Record<string, unknown>>> {
-  if (PEER_DISCOVERY_ENDPOINTS.length === 0 || depth >= MAX_PEER_DEPTH) return []
+  const peers = currentPeerEndpoints()
+  if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return []
   const merged: Array<Record<string, unknown>> = []
   const seen = new Set<string>()
-  await Promise.all(PEER_DISCOVERY_ENDPOINTS.map(async (peer) => {
+  await Promise.all(peers.map(async (peer) => {
     try {
       const res = await fetch(`${peer.replace(/\/$/, "")}/resolve`, {
         method: "POST",
@@ -77,6 +83,39 @@ async function forwardToPeers(
     } catch { /* peer unreachable / timed out — skip it; the local result stands */ }
   }))
   return merged
+}
+
+// General-shape fleet resolution (law 11 / location-transparency): on a LOCAL
+// miss for a non-discovery shape, forward the whole pointer to peer discovery
+// instances (the federation door, never a raw peer-vessel URL) and return the
+// first successful resolution. Reads the peer set at USE TIME and is depth-limited,
+// so a late-federated spoke participates and peer→peer can't recurse unbounded.
+async function forwardResolveToPeers(
+  pointer: DiscoveryPointer,
+  depth: number,
+  authHeader: string | undefined,
+): Promise<{ body: unknown; status: number } | undefined> {
+  const peers = currentPeerEndpoints()
+  if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return undefined
+  for (const peer of peers) {
+    try {
+      const res = await fetch(`${peer.replace(/\/$/, "")}/resolve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
+          "X-Discovery-Depth": String(depth + 1),
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        body: JSON.stringify({ pointer }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!res.ok) continue // 404 / error at this peer — try the next
+      const body = await res.json()
+      return { body, status: res.status }
+    } catch { /* peer unreachable / timed out — try the next peer */ }
+  }
+  return undefined
 }
 
 export function createServer() {
@@ -154,6 +193,13 @@ export function createServer() {
         const auth = getAuthContextOptional(c)
         const candidates = registry.findByShape(pointer.type, auth?.orgId ? { orgId: auth.orgId } : undefined).filter((v) => v.status === "healthy")
         if (candidates.length === 0) {
+          // Fleet-resolution: no LOCAL producer for this shape → forward the whole
+          // pointer to peer discovery instances so a shape served on another
+          // substrate resolves THROUGH discovery. Depth-limited; no-op unless
+          // PEER_DISCOVERY_ENDPOINTS is set, so single-substrate behaviour is unchanged.
+          const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
+          const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
+          if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           return c.json({ error: "Not found", shape: pointer.type }, 404)
         }
         const target = candidates[0]!
