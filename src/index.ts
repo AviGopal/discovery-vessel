@@ -46,6 +46,16 @@ function currentPeerEndpoints(): string[] {
     .split(",").map((s) => s.trim()).filter(Boolean)
 }
 const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "2", 10)
+// Location independence (law 11): a PEER discovery endpoint is the federation door to
+// ANOTHER substrate (e.g. the hub), a DIFFERENT trust domain. The caller's own token is
+// issued by THIS substrate's identity and is invalid at the peer (the peer validates a
+// key claiming the local issuer against its OWN HMAC secret), so forwarding it 401s and
+// the fan-out silently returns nothing. Use HUB_API_KEY — a peer/hub-issued service
+// credential — for cross-domain peer hops; fall back to the caller's header when unset
+// (same-domain / co-issued peers, unchanged).
+function peerAuthHeader(authHeader: string | undefined): string | undefined {
+  return process.env.HUB_API_KEY ? `ApiKey ${process.env.HUB_API_KEY}` : authHeader
+}
 const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "union").toLowerCase()
 
 async function forwardToPeers(
@@ -65,7 +75,7 @@ async function forwardToPeers(
           "Content-Type": "application/json",
           // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
           "X-Discovery-Depth": String(depth + 1),
-          ...(authHeader ? { Authorization: authHeader } : {}),
+          ...((peerAuthHeader(authHeader)) ? { Authorization: peerAuthHeader(authHeader)! } : {}),
         },
         body: JSON.stringify({ pointer }),
         signal: AbortSignal.timeout(5000),
@@ -105,7 +115,7 @@ async function forwardResolveToPeers(
           "Content-Type": "application/json",
           // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
           "X-Discovery-Depth": String(depth + 1),
-          ...(authHeader ? { Authorization: authHeader } : {}),
+          ...((peerAuthHeader(authHeader)) ? { Authorization: peerAuthHeader(authHeader)! } : {}),
         },
         body: JSON.stringify({ pointer }),
         signal: AbortSignal.timeout(10000),
