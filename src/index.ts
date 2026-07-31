@@ -218,7 +218,12 @@ export function createServer() {
         const policyOf = (v: (typeof candidates)[number]) => String(v.distribution_policy ?? ((v.metadata ?? {}) as Record<string, unknown>).duplicate_policy ?? "stateless");
         const firstPolicyOwner = candidates.find((v) => policyOf(v) === "unique_authoritative" || policyOf(v) === "stateful_data_owner_pin");
         const preferredAuthoritative = firstPolicyOwner && (firstPolicyOwner.metadata ?? {}).authoritative === true ? firstPolicyOwner : null;
-        const target = preferredAuthoritative ?? firstPolicyOwner ?? candidates[0]!
+        // Prefer a DIRECT (non-libp2p) local producer over a libp2p facade/remote row when both
+        // serve the shape locally, so a hub-native vessel's own resolves never route through the new
+        // @substrate inbound-advertise facade rows. Policy pins still win first; all-libp2p (genuinely
+        // remote-only) falls through to candidates[0] exactly as before.
+        const firstDirect = candidates.find((v) => (v as { protocol?: unknown }).protocol !== "libp2p")
+        const target = preferredAuthoritative ?? firstPolicyOwner ?? firstDirect ?? candidates[0]!
         const endpoint = target.endpoint
         const resolveEndpoint = target.resolve_endpoint ?? "/v2/impulses/resolve"
         const timeoutMs = target.resolve_timeout_ms ?? 10000
@@ -263,7 +268,8 @@ export function createServer() {
               const ma = v.libp2p_multiaddr
               const dialable = (Array.isArray(ma) && ma.length > 0)
                 || !/127\.0\.0\.1|localhost/.test(String(v.endpoint ?? ""))
-              const selfEcho = localPeerIds.has(String(v.libp2p_peer_id ?? ""))
+              const ma0 = Array.isArray(ma) ? String((ma as unknown[])[0] ?? "") : ""
+              const selfEcho = localPeerIds.has(String(v.libp2p_peer_id ?? "")) || [...localPeerIds].some((pid) => pid && ma0.includes(pid))
               return dialable && !selfEcho && !localIds.has(String(v.vesselId ?? ""))
             })
             if (usable.length > 0) {
