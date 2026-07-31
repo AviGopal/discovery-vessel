@@ -84,7 +84,10 @@ export async function resolveVesselCapability(
       resolve_timeout_ms: v.resolve_timeout_ms,
       // Auth token source (Wave A3) — also normalized at registration time.
       auth_token_source: v.auth_token_source,
-      auth_delegation_mode: v.auth_delegation_mode
+      auth_delegation_mode: v.auth_delegation_mode,
+      // Self-authored distribution/routing policy — echoed so federated routers
+      // and the transport ingress pick can honor it (not only discovery /resolve).
+      distribution_policy: v.distribution_policy
     })),
     found: vessels.length > 0
   }
@@ -201,7 +204,12 @@ export async function resolveVesselRegistry(
       resolve_request_format: v.resolve_request_format,
       status: v.status ?? "unknown",
       lastSeen: new Date(v.lastHeartbeat).toISOString(),
-      metadata: v.metadata
+      metadata: v.metadata,
+      // Advertise the vessel's own distribution policy + its p2p reachability in
+      // the canonical registry dump so the "p2p + own-rules" bar is observable.
+      distribution_policy: v.distribution_policy,
+      libp2p_peer_id: v.libp2p_peer_id,
+      libp2p_multiaddr: v.libp2p_multiaddr
     })),
     totalCount: vessels.length
   }

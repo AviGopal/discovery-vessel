@@ -57,6 +57,31 @@ export type AuthTokenSource =
  */
 export type AuthDelegationMode = "forward" | "mint" | "none"
 
+/**
+ * Self-authored distribution/routing rule a vessel advertises about ITS OWN
+ * shapes — the "vessels set their own distribution and routing rules" contract.
+ * The routing fixed point (discovery /resolve) and any federated router reading
+ * capability rows honor it when choosing among multiple producers of a shape.
+ *
+ *   "stateless"                 every instance is interchangeable; pick any live one (default).
+ *   "interchangeable"           explicit synonym of stateless.
+ *   "unique_authoritative"      exactly one row is authoritative; never load-balance across replicas.
+ *   "unique_target"             route to a single declared target (e.g. a pinned owner).
+ *   "stateful_data_owner_pin"   state lives on one instance; always route to the owning row.
+ *   "stateful_data_owner_merge" state is sharded; a caller fans out and merges across owners.
+ *
+ * Normalized at write time (defaults to "stateless"); read from a top-level
+ * `distribution_policy` field OR, for back-compat with vessels already sending
+ * it inside the free-form metadata blob, `metadata.duplicate_policy`.
+ */
+export type DistributionPolicy =
+  | "stateless"
+  | "interchangeable"
+  | "unique_authoritative"
+  | "unique_target"
+  | "stateful_data_owner_pin"
+  | "stateful_data_owner_merge"
+
 /** Default HTTP path for impulse resolution on a vessel. */
 export const DEFAULT_RESOLVE_ENDPOINT = "/v2/impulses/resolve"
 /** Default resolve request body encoding. */
@@ -67,6 +92,8 @@ export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none"
 export const DEFAULT_AUTH_TOKEN_SOURCE: AuthTokenSource = "caller_identity"
 /** Default delegation mode for user-identity tokens. */
 export const DEFAULT_AUTH_DELEGATION_MODE: AuthDelegationMode = "forward"
+/** Default distribution/routing policy when a vessel advertises none. */
+export const DEFAULT_DISTRIBUTION_POLICY: DistributionPolicy = "stateless"
 
 // =============================================================================
 // AUTHENTICATION
@@ -179,6 +206,11 @@ export interface VesselRegistration {
    *  defaults to "forward" when absent on input. Meaningful only when
    *  `auth_token_source === "user_identity"`. */
   auth_delegation_mode: AuthDelegationMode
+
+  /** Self-authored distribution/routing policy (see DistributionPolicy).
+   *  Normalized at write time — defaults to "stateless"; read from this field
+   *  or `metadata.duplicate_policy`. Honored by the /resolve producer pick. */
+  distribution_policy: DistributionPolicy
 
   /** Additional metadata */
   metadata?: {
@@ -325,6 +357,10 @@ export interface VesselCapability {
   auth_token_source: AuthTokenSource
   /** Delegation mode for user-identity tokens. */
   auth_delegation_mode: AuthDelegationMode
+
+  /** Self-authored distribution/routing policy the caller should honor when
+   *  this shape has multiple producers (see DistributionPolicy). */
+  distribution_policy?: DistributionPolicy
 }
 
 export interface VesselCapabilityResult {
@@ -369,6 +405,9 @@ export interface VesselRegistryResult {
     status: string
     lastSeen: string
     metadata?: Record<string, unknown>
+    distribution_policy?: DistributionPolicy
+    libp2p_peer_id?: string
+    libp2p_multiaddr?: string[]
   }>
   totalCount: number
 }
@@ -421,6 +460,9 @@ export interface RegisterRequest {
   /** System vessels are accessible to all tenants regardless of orgId. */
   systemVessel?: boolean
   metadata?: Record<string, unknown>
+  /** Self-authored distribution/routing policy (see DistributionPolicy). Optional;
+   *  normalized to "stateless" at write time. */
+  distribution_policy?: DistributionPolicy
   codebase?: {
     accessLevel: "read-write" | "read-only" | "none"
     modifiableBy?: string

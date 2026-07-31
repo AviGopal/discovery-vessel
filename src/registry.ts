@@ -6,13 +6,14 @@
  */
 
 import { createHash, createPublicKey, verify } from "node:crypto"
-import type { VesselRegistration } from "./types"
+import type { VesselRegistration, DistributionPolicy } from "./types"
 import {
   DEFAULT_RESOLVE_ENDPOINT,
   DEFAULT_RESOLVE_REQUEST_FORMAT,
   DEFAULT_RESOLVE_AUTH_SCHEME,
   DEFAULT_AUTH_TOKEN_SOURCE,
-  DEFAULT_AUTH_DELEGATION_MODE
+  DEFAULT_AUTH_DELEGATION_MODE,
+  DEFAULT_DISTRIBUTION_POLICY
 } from "./types"
 import { discoveryMetrics } from "./metrics"
 import { publishVesselEvent } from "./event-bus"
@@ -194,6 +195,7 @@ export class VesselRegistry {
           | "resolve_timeout_ms"
           | "auth_token_source"
           | "auth_delegation_mode"
+          | "distribution_policy"
         >
       & Partial<
           Pick<
@@ -204,6 +206,7 @@ export class VesselRegistry {
             | "resolve_timeout_ms"
             | "auth_token_source"
             | "auth_delegation_mode"
+            | "distribution_policy"
           >
         >
   ): VesselRegistration {
@@ -232,6 +235,12 @@ export class VesselRegistry {
       // Same pattern for auth-token-source contract (Wave A3, 2026-04-23).
       auth_token_source: registration.auth_token_source ?? DEFAULT_AUTH_TOKEN_SOURCE,
       auth_delegation_mode: registration.auth_delegation_mode ?? DEFAULT_AUTH_DELEGATION_MODE,
+      // Self-authored distribution/routing policy (2026-07-31): read the first-class
+      // field, else the value a vessel already ships inside metadata.duplicate_policy,
+      // else default. Makes every vessel advertise a policy the /resolve pick honors.
+      distribution_policy: registration.distribution_policy
+        ?? ((registration.metadata as Record<string, unknown> | undefined)?.duplicate_policy as DistributionPolicy | undefined)
+        ?? DEFAULT_DISTRIBUTION_POLICY,
       registeredAt: existing?.registeredAt ?? startTime,
       lastHeartbeat: startTime,
       expiresAt: startTime + DEFAULT_TTL_MS,

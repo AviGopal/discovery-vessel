@@ -212,7 +212,10 @@ export function createServer() {
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           return c.json({ error: "Not found", shape: pointer.type }, 404)
         }
-        const policyOf = (v: (typeof candidates)[number]) => String(((v.metadata ?? {}) as Record<string, unknown>).duplicate_policy ?? "stateless");
+        // Prefer the normalized first-class distribution_policy (registry fills it
+        // from the field OR metadata.duplicate_policy); fall back to raw metadata for
+        // any row written before normalization.
+        const policyOf = (v: (typeof candidates)[number]) => String(v.distribution_policy ?? ((v.metadata ?? {}) as Record<string, unknown>).duplicate_policy ?? "stateless");
         const firstPolicyOwner = candidates.find((v) => policyOf(v) === "unique_authoritative" || policyOf(v) === "stateful_data_owner_pin");
         const preferredAuthoritative = firstPolicyOwner && (firstPolicyOwner.metadata ?? {}).authoritative === true ? firstPolicyOwner : null;
         const target = preferredAuthoritative ?? firstPolicyOwner ?? candidates[0]!
@@ -328,6 +331,7 @@ export function createServer() {
         orgId,
         systemVessel: request.systemVessel,
         metadata: request.metadata,
+        distribution_policy: request.distribution_policy,
         codebase: request.codebase,
         // Phase 1: Explicit typed properties
         stateful: request.stateful,
