@@ -212,7 +212,10 @@ export function createServer() {
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           return c.json({ error: "Not found", shape: pointer.type }, 404)
         }
-        const target = candidates[0]!
+        const policyOf = (v: (typeof candidates)[number]) => String(((v.metadata ?? {}) as Record<string, unknown>).duplicate_policy ?? "stateless");
+        const firstPolicyOwner = candidates.find((v) => policyOf(v) === "unique_authoritative" || policyOf(v) === "stateful_data_owner_pin");
+        const preferredAuthoritative = firstPolicyOwner && (firstPolicyOwner.metadata ?? {}).authoritative === true ? firstPolicyOwner : null;
+        const target = preferredAuthoritative ?? firstPolicyOwner ?? candidates[0]!
         const endpoint = target.endpoint
         const resolveEndpoint = target.resolve_endpoint ?? "/v2/impulses/resolve"
         const timeoutMs = target.resolve_timeout_ms ?? 10000
