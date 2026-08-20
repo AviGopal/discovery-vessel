@@ -106,6 +106,21 @@ describe("401 carries the reason", () => {
     20_000
   )
 
+  it("says 'rejected' when identity denies with HTTP 401, not just 200+false", async () => {
+    // Measured against the live hub 2026-08-19: identity answers a bad key
+    // with HTTP 401, NOT 200 + authenticated:false. Classifying on `!res.ok`
+    // alone would file the fleet's most common real rejection under a generic
+    // transport-sounding reason, at exactly the moment an operator is deciding
+    // whether to reissue a credential.
+    identityHandler = () => new Response(JSON.stringify({ success: false }), { status: 401 })
+
+    const res = await attempt(freshKey())
+    expect(res.status).toBe(401)
+    const body = (await res.json()) as { error: { reason: string; detail: string } }
+    expect(body.error.reason).toBe("rejected")
+    expect(body.error.detail).toContain("401")
+  })
+
   it("says 'identity_http_error' with the status when identity 5xxes", async () => {
     identityHandler = () => new Response("boom", { status: 503 })
 

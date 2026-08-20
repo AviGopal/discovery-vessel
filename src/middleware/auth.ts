@@ -82,6 +82,10 @@ export function lastValidationFailureDetail(): string {
   switch (lastFailure) {
     case "identity_http_error":
       return `identity returned ${identityHttpErrorStatus}`
+    case "rejected":
+      return identityHttpErrorStatus === 401 || identityHttpErrorStatus === 403
+        ? `identity rejected the key (HTTP ${identityHttpErrorStatus})`
+        : "identity rejected the key"
     case "identity_unreachable":
       return "identity unreachable and no cached validation within the grace window"
     default:
@@ -182,7 +186,13 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     })
 
     if (!res.ok) {
-      lastFailure = "identity_http_error"
+      // A 401/403 from identity is a REJECTION expressed as a status code.
+      // Measured against the live hub: identity answers a bad key with HTTP
+      // 401, not 200 + authenticated:false, so classifying purely on `!res.ok`
+      // would report the fleet's most common real rejection as a generic
+      // "identity_http_error" — accurate but misleading at exactly the moment
+      // an operator is deciding whether to reissue a credential.
+      lastFailure = res.status === 401 || res.status === 403 ? "rejected" : "identity_http_error"
       identityHttpErrorStatus = res.status
       // A 5xx is identity FAULTING; a 4xx is identity DECIDING. Only the
       // former may be served from grace.
@@ -205,7 +215,10 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     const data = (await res.json()) as IdentityResolveResponse
     if (!data.success || !data.data?.authenticated) {
       // A definitive answer from identity: this key really is bad. Evict.
+      // Clear the status too — it is module-level and would otherwise report a
+      // PREVIOUS call's HTTP code alongside this call's reason.
       lastFailure = "rejected"
+      identityHttpErrorStatus = 0
       validationCache.delete(apiKey)
       return null
     }
@@ -222,6 +235,7 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     // Identity slow/unreachable — serve a known-good key within the grace
     // window rather than churning the registry; unknown keys fail closed.
     lastFailure = "identity_unreachable"
+    identityHttpErrorStatus = 0
     if (cached && now - cached.at < VALIDATION_GRACE_MS) {
       return cached.ctx
     }
