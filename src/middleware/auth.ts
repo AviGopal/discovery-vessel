@@ -42,6 +42,53 @@ interface IdentityResolveResponse {
  */
 export type IdentityValidator = (apiKey: string) => Promise<AuthContext | null>
 
+/**
+ * Why a validation failed, for the 401 log line.
+ *
+ * A 401 alone cannot distinguish "this key is revoked" from "identity was
+ * unreachable and the grace window expired" — and those demand opposite
+ * responses: the first is a credential to reissue, the second is a network
+ * fault to repair. Measured 2026-08-19: 169 register/heartbeat 401s over 37
+ * minutes on the UI spoke, with no reason recorded anywhere. The key was
+ * valid the whole time (identity answers `authenticated: true` for it), so
+ * every minute spent suspecting the credential was spent on the wrong thing.
+ *
+ * Set as a side channel rather than widening the `IdentityValidator` return
+ * type, so a test validator swapped in via `setIdentityValidator` keeps its
+ * existing `AuthContext | null` contract and simply reports "rejected".
+ */
+export type ValidationFailure =
+  /** Identity answered, and said no. The credential itself is bad. */
+  | "rejected"
+  /** Identity answered non-2xx — it is up but erroring. */
+  | "identity_http_error"
+  /** Identity unreachable/timed out, and no cached grace to fall back on. */
+  | "identity_unreachable"
+
+let lastFailure: ValidationFailure = "rejected"
+/** HTTP status behind the most recent `identity_http_error`, for the log line. */
+let identityHttpErrorStatus = 0
+
+/**
+ * Why the most recent validation failed. Read only on the 401 path, where a
+ * `null` from the validator has just been observed.
+ */
+export function lastValidationFailure(): ValidationFailure {
+  return lastFailure
+}
+
+/** A human-readable reason for the 401 log line and response body. */
+export function lastValidationFailureDetail(): string {
+  switch (lastFailure) {
+    case "identity_http_error":
+      return `identity returned ${identityHttpErrorStatus}`
+    case "identity_unreachable":
+      return "identity unreachable and no cached validation within the grace window"
+    default:
+      return "identity rejected the key"
+  }
+}
+
 // =============================================================================
 // PATHS THAT DO NOT REQUIRE AUTHENTICATION
 // =============================================================================
@@ -78,8 +125,20 @@ export const PUBLIC_PATH_PREFIXES: readonly string[] = [
 // IDENTITY VALIDATOR (swappable for testing)
 // =============================================================================
 
-const IDENTITY_VESSEL_URL =
-  process.env.IDENTITY_VESSEL_URL ?? "https://identity.metabob.com"
+/**
+ * Read at CALL time, not module-load time.
+ *
+ * A module-level const captures whatever the env held when the first importer
+ * pulled this file in. In the suite that made three tests silently validate
+ * against the PUBLIC identity service — they passed alone and failed in the
+ * full run, because another test file imported this module first and froze the
+ * default. The same hazard exists in production any time a unit rewrites its
+ * environment after start. Reading per call costs a property lookup and makes
+ * the value honest.
+ */
+function identityVesselUrl(): string {
+  return process.env.IDENTITY_VESSEL_URL ?? "https://identity.metabob.com"
+}
 
 // Short-TTL validation cache: discovery sits on every vessel's register/
 // heartbeat path, so a fresh HTTP validation per request turns identity-vessel
@@ -107,7 +166,7 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     return cached.ctx
   }
   try {
-    const res = await fetch(`${IDENTITY_VESSEL_URL}/v1/auth/resolve`, {
+    const res = await fetch(`${identityVesselUrl()}/v1/auth/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -123,12 +182,30 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     })
 
     if (!res.ok) {
+      lastFailure = "identity_http_error"
+      identityHttpErrorStatus = res.status
+      // A 5xx is identity FAULTING; a 4xx is identity DECIDING. Only the
+      // former may be served from grace.
+      //
+      // ★ The grace window must never outlive a revocation. `!res.ok` also
+      // covers 401/403 — identity's way of saying this key is revoked — and
+      // serving those from cache would keep a withdrawn credential working
+      // for the full 10-minute window. That is a strictly worse failure than
+      // the churn grace exists to prevent, so 4xx evicts exactly as before.
+      if (res.status >= 500) {
+        if (cached && now - cached.at < VALIDATION_GRACE_MS) {
+          return cached.ctx
+        }
+        return null
+      }
       validationCache.delete(apiKey)
       return null
     }
 
     const data = (await res.json()) as IdentityResolveResponse
     if (!data.success || !data.data?.authenticated) {
+      // A definitive answer from identity: this key really is bad. Evict.
+      lastFailure = "rejected"
       validationCache.delete(apiKey)
       return null
     }
@@ -144,6 +221,7 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
   } catch {
     // Identity slow/unreachable — serve a known-good key within the grace
     // window rather than churning the registry; unknown keys fail closed.
+    lastFailure = "identity_unreachable"
     if (cached && now - cached.at < VALIDATION_GRACE_MS) {
       return cached.ctx
     }
@@ -241,8 +319,30 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
   const authCtx = await _identityValidator(apiKey)
 
   if (!authCtx) {
+    // ★ LOG WHY. Discovery sits on every vessel's register/heartbeat path, so
+    // its 401s are the fleet's most-produced error — and until now the only
+    // record of one was the access log's bare `--> POST /heartbeat 401`, which
+    // is identical whether the key was revoked or identity was unreachable.
+    // The registry TTL is 5 minutes, so a sustained 401 silently empties the
+    // registry; the reason is what tells an operator whether to reissue a
+    // credential or repair a network path.
+    const failure = lastValidationFailure()
+    const detail = lastValidationFailureDetail()
+    console.warn(
+      `[discovery] 401 ${c.req.method} ${normalisedPath} — ${failure}: ${detail} (identity=${identityVesselUrl()})`
+    )
     return c.json(
-      { error: { code: "INVALID_API_KEY", message: "API key is invalid or has been revoked" } },
+      {
+        error: {
+          code: "INVALID_API_KEY",
+          message: "API key is invalid or has been revoked",
+          // The reason travels to the CALLER too. A vessel logging
+          // "discovery register failed: 401" cannot otherwise tell its
+          // operator anything about the cause.
+          reason: failure,
+          detail
+        }
+      },
       401
     )
   }
