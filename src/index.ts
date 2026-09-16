@@ -5,6 +5,7 @@
  * Vessels register themselves and query for capabilities.
  */
 
+import { readFileSync } from "node:fs"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
@@ -158,16 +159,32 @@ export function createServer() {
   app.get("/bootstrap", (c) => {
     const relayEnv = (process.env.RELAY_MULTIADDR ?? "")
       .split(",").map((s) => s.trim()).filter(Boolean)
-    // Fallback: derive the relay anchor from any registered circuit multiaddr
+    // Second tier: the relay persists RELAY_MULTIADDR into the env FILE after it
+    // starts — which can be after this process booted, when process.env was frozen.
+    // Read the file at request time (law 1) so a fresh hub's /bootstrap answers as
+    // soon as the relay is up, without a discovery restart. Never cached.
+    let relayFromFile: string[] = []
+    if (!relayEnv.length) {
+      try {
+        const envText = readFileSync(process.env.SUBSTRATE_ENV_FILE ?? "/etc/substrate/env", "utf8")
+        const cap = envText.match(/^RELAY_MULTIADDR=(.*)$/m)?.[1]
+        if (cap !== undefined) {
+          relayFromFile = cap.trim()
+            .replace(/^(["'])(.*)\1$/, "$2")
+            .split(",").map((s) => s.trim()).filter(Boolean)
+        }
+      } catch { /* no env file readable here — fall through to circuits */ }
+    }
+    // Final tier: derive the relay anchor from any registered circuit multiaddr
     // (/…/p2p/<relay>/p2p-circuit/p2p/<vessel>) so bootstrap works even if this
     // process was not handed RELAY_MULTIADDR directly.
-    const relayFromCircuits = relayEnv.length ? [] : Array.from(new Set(
+    const relayFromCircuits = (relayEnv.length || relayFromFile.length) ? [] : Array.from(new Set(
       registry.list()
         .flatMap((v) => v.libp2p_multiaddr ?? [])
         .map((ma) => { const i = ma.indexOf("/p2p-circuit"); return i > 0 ? ma.slice(0, i) : ""; })
         .filter(Boolean)
     ))
-    const relay_multiaddrs = relayEnv.length ? relayEnv : relayFromCircuits
+    const relay_multiaddrs = relayEnv.length ? relayEnv : (relayFromFile.length ? relayFromFile : relayFromCircuits)
     const publicIp = process.env.PUBLIC_IP ?? process.env.FED_PUBLIC_IP ?? ""
     const identity_endpoint =
       process.env.IDENTITY_PUBLIC_URL ??
