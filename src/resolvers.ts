@@ -58,10 +58,46 @@ export function derivePublicEndpoint(
 export async function resolveVesselCapability(
   pointer: VesselCapabilityPointer
 ): Promise<VesselCapabilityResult> {
-  const vessels = registry.findByShape(pointer.shape, {
+  let vessels = registry.findByShape(pointer.shape, {
     excludeVessels: pointer.excludeVessels,
     orgId: pointer.orgId
   })
+
+  // DEAD-ROW EVICTION AT RESOLVE TIME (2026-09-19). A short-lived process (a
+  // verify-suite or staged vessel copy booted with an ephemeral PORT) can
+  // register under a shared shape and die, leaving a row whose endpoint refuses
+  // every connection while its lastSeen stays fresh — measured three times in
+  // one day on fileContent/codeSearchResult (ports 21016, 26305, 28353), each
+  // time blinding fleet-wide compose grounding (0-byte refusals) until an
+  // operator restarted the real owner. Rather than trusting registration
+  // recency, probe the FIRST local-HTTP candidate with a cheap bounded request
+  // when there are alternatives to fall back to; a refused connection evicts
+  // that row from the registry and this response. Guarded narrowly: only
+  // local plain-HTTP rows are probed (libp2p rows are dialed via the overlay
+  // and cannot be TCP-probed here), only when more than one candidate exists
+  // (a sole row is returned as-is — a false eviction with no fallback would be
+  // strictly worse), and any probe error other than outright connection
+  // failure keeps the row (fail-open: slow is not dead).
+  if (vessels.length > 1) {
+    const head = vessels[0]
+    // Grace window: never probe a row younger than 15s — a vessel mid-restart
+    // has registered but may not be listening yet, and evicting it would turn
+    // a healthy restart into an outage. The measured dead rows persist for
+    // minutes, so the window costs nothing against the real failure.
+    const headAgeMs = head ? Date.now() - head.lastHeartbeat : 0
+    if (head && headAgeMs > 15000 && head.protocol !== "libp2p" && typeof head.endpoint === "string" && /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(head.endpoint)) {
+      try {
+        await fetch(head.endpoint.replace(/\/+$/, "") + "/health", { signal: AbortSignal.timeout(400) })
+      } catch (probeErr) {
+        const msg = String((probeErr as Error)?.message ?? probeErr)
+        if (/refused|ECONNREFUSED|Unable to connect|ConnectionRefused/i.test(msg)) {
+          console.warn(`[discovery] evicting dead row for shape=${pointer.shape}: ${head.endpoint} refused connection (vesselId=${String(head.vesselId)})`)
+          try { registry.unregister(String(head.vesselId)) } catch { /* eviction is best-effort */ }
+          vessels = vessels.slice(1)
+        }
+      }
+    }
+  }
 
   return {
     shape: pointer.shape,

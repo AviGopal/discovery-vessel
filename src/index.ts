@@ -321,6 +321,24 @@ export function createServer() {
       if (!request.vesselId || !request.endpoint || !request.shapes) {
         return c.json({ error: "Missing required fields: vesselId, endpoint, shapes" }, 400)
       }
+      // INPUT VALIDATION (security-audit contract). Presence checks alone admitted
+      // malformed and oversized registrations — wrong types, empty strings, an
+      // empty shapes array, 10k-char ids — the audit tests expected 400/413 and
+      // measured 201 on every one. Registry garbage is not hypothetical: dead
+      // ephemeral-port rows registered under shared shapes blinded fleet-wide
+      // compose grounding three times on 2026-09-19. Validate types and bound sizes.
+      if (typeof request.vesselId !== "string" || typeof request.endpoint !== "string" || request.vesselId.trim() === "" || request.endpoint.trim() === "") {
+        return c.json({ error: "vesselId and endpoint must be non-empty strings" }, 400)
+      }
+      if (request.vesselName !== undefined && typeof request.vesselName !== "string") {
+        return c.json({ error: "vesselName must be a string when present" }, 400)
+      }
+      if (!Array.isArray(request.shapes) || request.shapes.length === 0 || !request.shapes.every((s) => typeof s === "string" && s.length > 0)) {
+        return c.json({ error: "shapes must be a non-empty array of non-empty strings" }, 400)
+      }
+      if (request.vesselId.length > 256 || request.endpoint.length > 2048 || request.shapes.length > 512) {
+        return c.json({ error: "payload exceeds bounds: vesselId<=256 chars, endpoint<=2048 chars, shapes<=512 entries" }, 413)
+      }
 
       // Use the authenticated caller's orgId. The body's orgId is ignored in
       // favour of the verified identity so that a caller cannot register
