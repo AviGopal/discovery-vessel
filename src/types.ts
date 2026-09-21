@@ -15,7 +15,7 @@
  * - "mcp-tool": body is `{tool: "${pointer.type}_resolve", arguments: pointer}`
  *   (used by MCP-style vessels like legacy concept-db).
  */
-export type ResolveRequestFormat = "pointer" | "mcp-tool"
+export type ResolveRequestFormat = "pointer" | "mcp-tool";
 
 /**
  * Authentication scheme the vessel expects on resolve requests.
@@ -23,7 +23,7 @@ export type ResolveRequestFormat = "pointer" | "mcp-tool"
  * - "ApiKey": `Authorization: ApiKey <key>`
  * - "Bearer": `Authorization: Bearer <token>`
  */
-export type ResolveAuthScheme = "none" | "ApiKey" | "Bearer"
+export type ResolveAuthScheme = "none" | "ApiKey" | "Bearer";
 
 /**
  * Which credential the caller should attach when invoking this vessel's
@@ -40,10 +40,7 @@ export type ResolveAuthScheme = "none" | "ApiKey" | "Bearer"
  * See `docs/specs/auth-token-source-field.md` in the super-repo.
  */
 export type AuthTokenSource =
-  | "caller_identity"
-  | "user_identity"
-  | "service_identity"
-  | "no_token"
+  "caller_identity" | "user_identity" | "service_identity" | "no_token";
 
 /**
  * For vessels that advertise `auth_token_source: "user_identity"`, declares
@@ -55,7 +52,7 @@ export type AuthTokenSource =
  *
  * Default: `"forward"`.
  */
-export type AuthDelegationMode = "forward" | "mint" | "none"
+export type AuthDelegationMode = "forward" | "mint" | "none";
 
 /**
  * Self-authored distribution/routing rule a vessel advertises about ITS OWN
@@ -80,20 +77,20 @@ export type DistributionPolicy =
   | "unique_authoritative"
   | "unique_target"
   | "stateful_data_owner_pin"
-  | "stateful_data_owner_merge"
+  | "stateful_data_owner_merge";
 
 /** Default HTTP path for impulse resolution on a vessel. */
-export const DEFAULT_RESOLVE_ENDPOINT = "/v2/impulses/resolve"
+export const DEFAULT_RESOLVE_ENDPOINT = "/v2/impulses/resolve";
 /** Default resolve request body encoding. */
-export const DEFAULT_RESOLVE_REQUEST_FORMAT: ResolveRequestFormat = "pointer"
+export const DEFAULT_RESOLVE_REQUEST_FORMAT: ResolveRequestFormat = "pointer";
 /** Default auth scheme (no auth). */
-export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none"
+export const DEFAULT_RESOLVE_AUTH_SCHEME: ResolveAuthScheme = "none";
 /** Default credential kind (caller's own service identity). */
-export const DEFAULT_AUTH_TOKEN_SOURCE: AuthTokenSource = "caller_identity"
+export const DEFAULT_AUTH_TOKEN_SOURCE: AuthTokenSource = "caller_identity";
 /** Default delegation mode for user-identity tokens. */
-export const DEFAULT_AUTH_DELEGATION_MODE: AuthDelegationMode = "forward"
+export const DEFAULT_AUTH_DELEGATION_MODE: AuthDelegationMode = "forward";
 /** Default distribution/routing policy when a vessel advertises none. */
-export const DEFAULT_DISTRIBUTION_POLICY: DistributionPolicy = "stateless"
+export const DEFAULT_DISTRIBUTION_POLICY: DistributionPolicy = "stateless";
 
 // =============================================================================
 // AUTHENTICATION
@@ -104,10 +101,10 @@ export const DEFAULT_DISTRIBUTION_POLICY: DistributionPolicy = "stateless"
  * request. Available via `getAuthContext(c)` in route handlers.
  */
 export interface AuthContext {
-  orgId: string
-  userId: string
-  keyId: string
-  scopes: string[]
+  orgId: string;
+  userId: string;
+  keyId: string;
+  scopes: string[];
 }
 
 // =============================================================================
@@ -119,24 +116,24 @@ export interface AuthContext {
  */
 export interface VesselRegistration {
   /** Advisory (recorded, never enforced) proof-of-possession: base64-encoded Ed25519 public key (32 bytes raw). */
-  pubkey?: string
+  pubkey?: string;
   /** Advisory proof-of-possession: base64 Ed25519 signature over canonical JSON of {vesselId, identity_signed_at, identity_nonce}. */
-  identity_signature?: string
+  identity_signature?: string;
   /** Advisory proof-of-possession: nonce used in the identity signature payload. */
-  identity_nonce?: string
+  identity_nonce?: string;
   /** Advisory proof-of-possession: unix ms timestamp used in the identity signature payload. */
-  identity_signed_at?: number
+  identity_signed_at?: number;
   /** Registry-computed advisory field: base64url SHA-256 of the raw pubkey bytes. */
-  pubkey_hash?: string
+  pubkey_hash?: string;
   /** Registry-computed advisory identity status: verified = signature checked OK, unverified = no signature provided, mismatch = signature check failed. */
-  identity_status?: "verified" | "unverified" | "mismatch"
-  vesselId: string
-  vesselName: string
-  version: string
-  endpoint: string
+  identity_status?: "verified" | "unverified" | "mismatch";
+  vesselId: string;
+  vesselName: string;
+  version: string;
+  endpoint: string;
 
   /** Impulse shapes this vessel can resolve */
-  shapes: string[]
+  shapes: string[];
 
   /**
    * OPTIONAL per-shape one-line descriptions: shape id → "what it produces +
@@ -147,25 +144,25 @@ export interface VesselRegistration {
    * description once, here. Backward-compatible — absent = today's id-only
    * behaviour. Keys that aren't in `shapes` are ignored at read time.
    */
-  shape_descriptions?: Record<string, string>
+  shape_descriptions?: Record<string, string>;
 
   /** Protocol for communication (defaults to http). "libp2p" = reachable over the
    *  libp2p overlay (peerId/multiaddr below) rather than a plain http endpoint. */
-  protocol?: "http" | "grpc" | "ws" | "unix" | "libp2p"
+  protocol?: "http" | "grpc" | "ws" | "unix" | "libp2p";
 
   // --- libp2p transport (federation reachability) ---------------------------
   /** Stable libp2p PeerId (multihash of the vessel pubkey, seeded from vessel id).
    *  Present when the vessel is reachable over the libp2p overlay. */
-  libp2p_peer_id?: string
+  libp2p_peer_id?: string;
   /** libp2p multiaddr(s) the vessel is reachable at — typically a relay-circuit
    *  address `/…/p2p/<relay>/p2p-circuit/p2p/<vessel>`. Callers dial these over the
    *  overlay (NAT-traversed via relay + DCUtR). This is the field a caller needs to
    *  reach a peer vessel; advertised here because discovery's capability response
    *  does NOT echo `metadata`. */
-  libp2p_multiaddr?: string[]
+  libp2p_multiaddr?: string[];
 
   /** Organizational scope */
-  orgId?: string
+  orgId?: string;
 
   /**
    * When `true`, this vessel is treated as a system vessel accessible to all
@@ -173,7 +170,7 @@ export interface VesselRegistration {
    * this flag. Use `systemVessel: true` instead of leaving `orgId` undefined
    * for public/shared infrastructure vessels.
    */
-  systemVessel?: boolean
+  systemVessel?: boolean;
 
   /**
    * Optional host/LAN-reachable URL for callers OUTSIDE the substrate's
@@ -182,90 +179,90 @@ export interface VesselRegistration {
    * `public_endpoint` when present. Stored and echoed verbatim; absent means
    * no behavior change (2026-07-02, cross-host attach contract).
    */
-  public_endpoint?: string
+  public_endpoint?: string;
 
   // --- Resolve contract (Wave 1A) -------------------------------------------
   /** HTTP path appended to `endpoint` when resolving impulses. */
-  resolve_endpoint: string
+  resolve_endpoint: string;
 
   /** Shape of the resolve request body (pointer vs mcp-tool). */
-  resolve_request_format: ResolveRequestFormat
+  resolve_request_format: ResolveRequestFormat;
 
   /** Authentication scheme expected on resolve requests. */
-  auth_scheme: ResolveAuthScheme
+  auth_scheme: ResolveAuthScheme;
 
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
-  resolve_timeout_ms?: number
+  resolve_timeout_ms?: number;
 
   // --- Auth token source (Wave A3, 2026-04-23) ------------------------------
   /** Which credential kind the caller should attach. Normalized at write
    *  time — defaults to "caller_identity" when absent on input. */
-  auth_token_source: AuthTokenSource
+  auth_token_source: AuthTokenSource;
 
   /** Delegation mode for user-identity tokens. Normalized at write time —
    *  defaults to "forward" when absent on input. Meaningful only when
    *  `auth_token_source === "user_identity"`. */
-  auth_delegation_mode: AuthDelegationMode
+  auth_delegation_mode: AuthDelegationMode;
 
   /** Self-authored distribution/routing policy (see DistributionPolicy).
    *  Normalized at write time — defaults to "stateless"; read from this field
    *  or `metadata.duplicate_policy`. Honored by the /resolve producer pick. */
-  distribution_policy: DistributionPolicy
+  distribution_policy: DistributionPolicy;
 
   /** Additional metadata */
   metadata?: {
-    environment?: "k8s-cluster" | "docker" | "local"
-    podId?: string
-    replicaIndex?: number
-    clusterMode?: boolean
-    [key: string]: unknown
-  }
+    environment?: "k8s-cluster" | "docker" | "local";
+    podId?: string;
+    replicaIndex?: number;
+    clusterMode?: boolean;
+    [key: string]: unknown;
+  };
 
   /** Access control for cross-vessel operations */
   codebase?: {
-    accessLevel: "read-write" | "read-only" | "none"
-    modifiableBy?: string
-  }
+    accessLevel: "read-write" | "read-only" | "none";
+    modifiableBy?: string;
+  };
 
   /** Health status (computed) */
-  status?: "healthy" | "degraded" | "unhealthy" | "unknown"
+  status?: "healthy" | "degraded" | "unhealthy" | "unknown";
 
   /** Timestamps */
-  registeredAt: number
-  lastHeartbeat: number
-  expiresAt?: number
+  registeredAt: number;
+  lastHeartbeat: number;
+  expiresAt?: number;
 
   // Phase 1: Explicit typed properties
   /** Whether the vessel maintains state */
-  stateful?: boolean
+  stateful?: boolean;
 
   /** State tracking information */
   state?: {
-    lastMigration?: string
-    schemaVersion?: string
-    recordCount?: number
+    lastMigration?: string;
+    schemaVersion?: string;
+    recordCount?: number;
     healthMetrics?: {
-      errorRate?: number
-      avgLatencyMs?: number
-      lastBackup?: string
-    }
-  }
+      errorRate?: number;
+      avgLatencyMs?: number;
+      lastBackup?: string;
+    };
+  };
 
   /** Resolver configurations */
   resolvers?: Array<{
-    id: string
-    tier: string
-    operations?: string[]
-  }>
+    id: string;
+    tier: string;
+    operations?: string[];
+  }>;
 
   /** Git commit SHA for tracking deployments */
-  commitSha?: string
+  commitSha?: string;
 
   /** How the vessel was discovered */
-  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap"
+  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap";
 
   /** ID of the vessel that discovered this one */
-  discoveredBy?: string
+  discoveredBy?: string;
 }
 
 // =============================================================================
@@ -276,41 +273,41 @@ export interface VesselRegistration {
  * vesselCapability - Query which vessels can resolve a specific shape
  */
 export interface VesselCapabilityPointer {
-  type: "vesselCapability"
-  shape: string
-  excludeVessels?: string[]
-  orgId?: string
+  type: "vesselCapability";
+  shape: string;
+  excludeVessels?: string[];
+  orgId?: string;
 }
 
 /**
  * vesselEndpoint - Get the endpoint URL for a specific vessel
  */
 export interface VesselEndpointPointer {
-  type: "vesselEndpoint"
-  vesselId: string
-  preferLocal?: boolean
+  type: "vesselEndpoint";
+  vesselId: string;
+  preferLocal?: boolean;
 }
 
 /**
  * vesselHealth - Check if a vessel is responsive and healthy
  */
 export interface VesselHealthPointer {
-  type: "vesselHealth"
-  vesselId: string
-  checkEndpoint?: boolean
-  timeout?: number
+  type: "vesselHealth";
+  vesselId: string;
+  checkEndpoint?: boolean;
+  timeout?: number;
 }
 
 /**
  * vesselRegistry - List all registered vessels
  */
 export interface VesselRegistryPointer {
-  type: "vesselRegistry"
+  type: "vesselRegistry";
   filters?: {
-    shapes?: string[]
-    status?: ("healthy" | "degraded" | "unhealthy")[]
-    orgId?: string
-  }
+    shapes?: string[];
+    status?: ("healthy" | "degraded" | "unhealthy")[];
+    orgId?: string;
+  };
 }
 
 /**
@@ -320,232 +317,232 @@ export type DiscoveryPointer =
   | VesselCapabilityPointer
   | VesselEndpointPointer
   | VesselHealthPointer
-  | VesselRegistryPointer
+  | VesselRegistryPointer;
 
 // =============================================================================
 // RESOLUTION RESULTS
 // =============================================================================
 
 export interface VesselCapability {
-  vesselId: string
-  vesselName: string
-  endpoint: string
-  protocol?: string
+  vesselId: string;
+  vesselName: string;
+  endpoint: string;
+  protocol?: string;
   /** libp2p transport (federation reachability) — present when the vessel advertised
    *  a libp2p peerId/multiaddr at registration. Callers dial `libp2p_multiaddr` over
    *  the overlay when the vessel isn't reachable at a plain http `endpoint`. */
-  libp2p_peer_id?: string
-  libp2p_multiaddr?: string[]
-  confidence: number
-  lastSeen: string
+  libp2p_peer_id?: string;
+  libp2p_multiaddr?: string[];
+  confidence: number;
+  lastSeen: string;
 
   /** Optional host/LAN-reachable URL advertised by the vessel (see registration). */
-  public_endpoint?: string
+  public_endpoint?: string;
 
   // --- Resolve contract (Wave 1A) -------------------------------------------
   /** HTTP path appended to `endpoint` when resolving impulses. */
-  resolve_endpoint: string
+  resolve_endpoint: string;
   /** Shape of the resolve request body (pointer vs mcp-tool). */
-  resolve_request_format: ResolveRequestFormat
+  resolve_request_format: ResolveRequestFormat;
   /** Authentication scheme expected on resolve requests. */
-  auth_scheme: ResolveAuthScheme
+  auth_scheme: ResolveAuthScheme;
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms). */
-  resolve_timeout_ms?: number
+  resolve_timeout_ms?: number;
 
   // --- Auth token source (Wave A3, 2026-04-23) ------------------------------
   /** Which credential kind the caller should attach. */
-  auth_token_source: AuthTokenSource
+  auth_token_source: AuthTokenSource;
   /** Delegation mode for user-identity tokens. */
-  auth_delegation_mode: AuthDelegationMode
+  auth_delegation_mode: AuthDelegationMode;
 
   /** Self-authored distribution/routing policy the caller should honor when
    *  this shape has multiple producers (see DistributionPolicy). */
-  distribution_policy?: DistributionPolicy
+  distribution_policy?: DistributionPolicy;
 }
 
 export interface VesselCapabilityResult {
-  shape: string
-  vessels: VesselCapability[]
-  found: boolean
+  shape: string;
+  vessels: VesselCapability[];
+  found: boolean;
 }
 
 export interface VesselEndpointResult {
-  vesselId: string
-  vesselName: string
-  endpoint: string
-  externalEndpoint?: string
-  protocol?: string
-  health: string
-  lastSeen: string
+  vesselId: string;
+  vesselName: string;
+  endpoint: string;
+  externalEndpoint?: string;
+  protocol?: string;
+  health: string;
+  lastSeen: string;
 }
 
 export interface VesselHealthResult {
-  vesselId: string
-  status: "healthy" | "degraded" | "unhealthy" | "unknown"
-  endpoint: string
-  lastHeartbeat: string
-  uptimeSeconds?: number
-  error?: string
+  vesselId: string;
+  status: "healthy" | "degraded" | "unhealthy" | "unknown";
+  endpoint: string;
+  lastHeartbeat: string;
+  uptimeSeconds?: number;
+  error?: string;
   metrics?: {
-    executionsCompleted?: number
-    errorRate?: number
-    avgLatencyMs?: number
-  }
+    executionsCompleted?: number;
+    errorRate?: number;
+    avgLatencyMs?: number;
+  };
 }
 
 export interface VesselRegistryResult {
   vessels: Array<{
-    vesselId: string
-    vesselName: string
-    shapes: string[]
-    endpoint: string
-    resolve_endpoint?: string
-    resolve_request_format?: string
-    protocol?: string
-    status: string
-    lastSeen: string
-    metadata?: Record<string, unknown>
-    distribution_policy?: DistributionPolicy
-    libp2p_peer_id?: string
-    libp2p_multiaddr?: string[]
-  }>
-  totalCount: number
+    vesselId: string;
+    vesselName: string;
+    shapes: string[];
+    endpoint: string;
+    resolve_endpoint?: string;
+    resolve_request_format?: string;
+    protocol?: string;
+    status: string;
+    lastSeen: string;
+    metadata?: Record<string, unknown>;
+    distribution_policy?: DistributionPolicy;
+    libp2p_peer_id?: string;
+    libp2p_multiaddr?: string[];
+  }>;
+  totalCount: number;
 }
 
 export type ResolverResult =
   | VesselCapabilityResult
   | VesselEndpointResult
   | VesselHealthResult
-  | VesselRegistryResult
+  | VesselRegistryResult;
 
 // =============================================================================
 // API TYPES
 // =============================================================================
 
 export interface ResolveRequest {
-  pointer: DiscoveryPointer
+  pointer: DiscoveryPointer;
 }
 
 export interface ResolveResponse {
-  content: ResolverResult
+  content: ResolverResult;
   metadata?: {
-    shape: string
-    resolvedAt: string
-    cacheStatus?: "hit" | "miss"
-  }
+    shape: string;
+    resolvedAt: string;
+    cacheStatus?: "hit" | "miss";
+  };
 }
 
 export interface RegisterRequest {
   /** Advisory (recorded, never enforced) proof-of-possession: base64-encoded Ed25519 public key (32 bytes raw). */
-  pubkey?: string
+  pubkey?: string;
   /** Advisory proof-of-possession: base64 Ed25519 signature over canonical JSON of {vesselId, identity_signed_at, identity_nonce}. */
-  identity_signature?: string
+  identity_signature?: string;
   /** Advisory proof-of-possession: nonce used in the identity signature payload. */
-  identity_nonce?: string
+  identity_nonce?: string;
   /** Advisory proof-of-possession: unix ms timestamp used in the identity signature payload. */
-  identity_signed_at?: number
-  vesselId: string
-  vesselName: string
-  version: string
-  endpoint: string
-  shapes: string[]
+  identity_signed_at?: number;
+  vesselId: string;
+  vesselName: string;
+  version: string;
+  endpoint: string;
+  shapes: string[];
   /** OPTIONAL per-shape one-line descriptions (shape id → "produces + when to
    *  use it"). Powers description-based planner matching. Backward-compatible. */
-  shape_descriptions?: Record<string, string>
-  protocol?: string
+  shape_descriptions?: Record<string, string>;
+  protocol?: string;
   /** libp2p transport advertisement (federation reachability). */
-  libp2p_peer_id?: string
-  libp2p_multiaddr?: string[]
-  orgId?: string
+  libp2p_peer_id?: string;
+  libp2p_multiaddr?: string[];
+  orgId?: string;
   /** System vessels are accessible to all tenants regardless of orgId. */
-  systemVessel?: boolean
-  metadata?: Record<string, unknown>
+  systemVessel?: boolean;
+  metadata?: Record<string, unknown>;
   /** Self-authored distribution/routing policy (see DistributionPolicy). Optional;
    *  normalized to "stateless" at write time. */
-  distribution_policy?: DistributionPolicy
+  distribution_policy?: DistributionPolicy;
   codebase?: {
-    accessLevel: "read-write" | "read-only" | "none"
-    modifiableBy?: string
-  }
+    accessLevel: "read-write" | "read-only" | "none";
+    modifiableBy?: string;
+  };
 
   /** Optional host/LAN-reachable URL for callers outside the substrate network. */
-  public_endpoint?: string
+  public_endpoint?: string;
 
   // --- Resolve contract (Wave 1A, all optional) -----------------------------
   /** HTTP path appended to `endpoint` when resolving impulses.
    *  Default: "/v2/impulses/resolve" */
-  resolve_endpoint?: string
+  resolve_endpoint?: string;
   /** Shape of the resolve request body. Default: "pointer" */
-  resolve_request_format?: ResolveRequestFormat
+  resolve_request_format?: ResolveRequestFormat;
   /** Authentication scheme expected on resolve requests. Default: "none" */
-  auth_scheme?: ResolveAuthScheme
+  auth_scheme?: ResolveAuthScheme;
   /** Vessel-declared max-time-to-respond on the resolve endpoint (ms).
    *  Left unset by default; client applies its own default (typically 5000). */
-  resolve_timeout_ms?: number
+  resolve_timeout_ms?: number;
 
   // --- Auth token source (Wave A3, 2026-04-23, all optional) ---------------
   /** Which credential kind callers should attach. Default: "caller_identity". */
-  auth_token_source?: AuthTokenSource
+  auth_token_source?: AuthTokenSource;
   /** Delegation mode for user-identity tokens. Default: "forward". */
-  auth_delegation_mode?: AuthDelegationMode
+  auth_delegation_mode?: AuthDelegationMode;
 
   // Phase 1: Explicit typed properties
   /** Whether the vessel maintains state */
-  stateful?: boolean
+  stateful?: boolean;
 
   /** State tracking information */
   state?: {
-    lastMigration?: string
-    schemaVersion?: string
-    recordCount?: number
+    lastMigration?: string;
+    schemaVersion?: string;
+    recordCount?: number;
     healthMetrics?: {
-      errorRate?: number
-      avgLatencyMs?: number
-      lastBackup?: string
-    }
-  }
+      errorRate?: number;
+      avgLatencyMs?: number;
+      lastBackup?: string;
+    };
+  };
 
   /** Resolver configurations */
   resolvers?: Array<{
-    id: string
-    tier: string
-    operations?: string[]
-  }>
+    id: string;
+    tier: string;
+    operations?: string[];
+  }>;
 
   /** Git commit SHA for tracking deployments */
-  commitSha?: string
+  commitSha?: string;
 
   /** How the vessel was discovered */
-  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap"
+  discoveredVia?: "self" | "peer" | "network-scan" | "bootstrap";
 
   /** ID of the vessel that discovered this one */
-  discoveredBy?: string
+  discoveredBy?: string;
 }
 
 export interface RegisterResponse {
-  success: boolean
-  vesselId: string
-  expiresAt: number
+  success: boolean;
+  vesselId: string;
+  expiresAt: number;
 }
 
 export interface HeartbeatRequest {
-  vesselId: string
+  vesselId: string;
   metrics?: {
-    executionsCompleted?: number
-    errorRate?: number
-    avgLatencyMs?: number
-  }
+    executionsCompleted?: number;
+    errorRate?: number;
+    avgLatencyMs?: number;
+  };
 }
 
 export interface HeartbeatResponse {
-  success: boolean
-  nextHeartbeatMs: number
+  success: boolean;
+  nextHeartbeatMs: number;
 }
 
 export interface HealthResponse {
-  status: "ok" | "degraded"
-  vessel: "discovery"
-  version: string
-  registeredVessels: number
-  uptime: number
+  status: "ok" | "degraded";
+  vessel: "discovery";
+  version: string;
+  registeredVessels: number;
+  uptime: number;
 }
