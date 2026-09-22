@@ -130,6 +130,8 @@ export interface VesselRegistration {
   pubkey_hash?: string
   /** Registry-computed advisory identity status: verified = signature checked OK, unverified = no signature provided, mismatch = signature check failed. */
   identity_status?: "verified" | "unverified" | "mismatch"
+  /** Registry-computed attribution: who last wrote this row (the /register handler passes the verified auth identity + remote address; fail-open, absent for self-registered rows). */
+  last_writer?: { remote_addr?: string; key_id?: string; user_id?: string; org_id?: string; claimed_vessel_id?: string; at?: number }
   vesselId: string
   vesselName: string
   version: string
@@ -337,6 +339,8 @@ export interface VesselCapability {
   libp2p_peer_id?: string
   libp2p_multiaddr?: string[]
   confidence: number
+  /** Registrant attribution echoed from the registry row (who last wrote it). */
+  last_writer?: { remote_addr?: string; key_id?: string; user_id?: string; org_id?: string; claimed_vessel_id?: string; at?: number }
   lastSeen: string
 
   /** Optional host/LAN-reachable URL advertised by the vessel (see registration). */

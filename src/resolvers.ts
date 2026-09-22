@@ -112,6 +112,9 @@ export async function resolveVesselCapability(
       libp2p_peer_id: v.libp2p_peer_id,
       libp2p_multiaddr: v.libp2p_multiaddr,
       confidence: 1.0,
+      // Registrant attribution (who last wrote this row) -- echoed so a dead
+      // ephemeral-port row can be traced to its writer without host access.
+      last_writer: v.last_writer,
       lastSeen: new Date(v.lastHeartbeat).toISOString(),
       // Resolve contract (Wave 1A) — already normalized at registration time.
       resolve_endpoint: v.resolve_endpoint,

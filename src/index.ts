@@ -346,6 +346,76 @@ export function createServer() {
       const auth = getAuthContextOptional(c)
       const orgId = auth?.orgId ?? request.orgId
 
+      // REGISTRANT ATTRIBUTION: capture who is writing this row. Remote addr
+      // comes from the proxy header when present, else Bun's server.requestIP
+      // (c.env is the Bun server object under the default-export serve style).
+      // Fail-open: attribution must never block registration.
+      let remoteAddr = c.req.header("x-forwarded-for") ?? ""
+      if (!remoteAddr) {
+        try {
+          const server = c.env as unknown as { requestIP?: (r: Request) => { address?: string } | null } | undefined
+          remoteAddr = server?.requestIP?.(c.req.raw)?.address ?? ""
+        } catch { remoteAddr = "" }
+      }
+      const callerInfo = {
+        remote_addr: remoteAddr || undefined,
+        key_id: auth?.keyId,
+        user_id: auth?.userId,
+        org_id: auth?.orgId,
+        claimed_vessel_id: request.vesselId,
+        endpoint: request.endpoint,
+      }
+
+      // REGISTRATION-TIME LIVENESS GUARD. Three times a writer registered
+      // shared shapes on a dead ephemeral port (21016, 26305, 28353; also
+      // 28905, 24257), blinding fleet-wide compose grounding until an operator
+      // restarted the real owner. When the offered endpoint's PORT differs
+      // from the live row it replaces, probe the NEW endpoint's /health
+      // (1500ms, one retry after 750ms so a vessel that registers moments
+      // before it starts listening still passes) before accepting: a genuine
+      // restart on a new port answers and passes; a dead ephemeral port is
+      // refused and the old row kept. Guard machinery errors fail open -- only
+      // an actually failed probe refuses. Register path only; serve path untouched.
+      const prior = registry.get(request.vesselId)
+      let refuseReason = ""
+      if (prior && typeof prior.endpoint === "string") {
+        try {
+          const portOf = (u: string): string => {
+            try {
+              const parsed = new URL(u)
+              return parsed.port || (parsed.protocol === "https:" ? "443" : "80")
+            } catch { return "" }
+          }
+          const oldPort = portOf(prior.endpoint)
+          const newPort = portOf(request.endpoint)
+          if (oldPort && newPort && oldPort !== newPort) {
+            const probeUrl = request.endpoint.replace(/\/+$/, "") + "/health"
+            const probeOnce = async (): Promise<string> => {
+              try {
+                const probe = await fetch(probeUrl, { signal: AbortSignal.timeout(1500) })
+                return probe.ok ? "" : `health probe returned HTTP ${probe.status}`
+              } catch (probeErr) {
+                return `health probe failed: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`
+              }
+            }
+            refuseReason = await probeOnce()
+            if (refuseReason) {
+              await new Promise((resolveWait) => setTimeout(resolveWait, 750))
+              refuseReason = await probeOnce()
+            }
+          }
+        } catch { refuseReason = "" /* guard machinery error -- fail open, accept */ }
+      }
+      if (refuseReason) {
+        registry.recordWriter(request.vesselId, { ...callerInfo, kind: "refused_dead_endpoint", detail: refuseReason })
+        return c.json({
+          error: "registration refused: new endpoint failed liveness probe; prior registration retained",
+          vesselId: request.vesselId,
+          offered_endpoint: request.endpoint,
+          prior_endpoint: prior?.endpoint,
+          detail: refuseReason,
+        }, 409)
+      }
       const registration = registry.register({
         vesselId: request.vesselId,
         vesselName: request.vesselName ?? request.vesselId,
@@ -392,6 +462,10 @@ export function createServer() {
         auth_token_source: request.auth_token_source,
         auth_delegation_mode: request.auth_delegation_mode
       })
+
+      // Attribution write (fail-open by contract: recordWriter never throws;
+      // tolerates the row having been evicted by peer dedup inside register()).
+      registry.recordWriter(request.vesselId, callerInfo)
 
       const response: RegisterResponse = {
         success: true,
@@ -538,6 +612,14 @@ export function createServer() {
       const message = error instanceof Error ? error.message : String(error)
       return c.json({ error: message }, 400)
     }
+  })
+
+  // Recent registration events (registrant attribution + liveness refusals).
+  // Bounded in-memory ring (last 500). Auth required: not in PUBLIC_PATHS.
+  app.get("/registry/events", (c) => {
+    const limitParam = parseInt(c.req.query("limit") ?? "100", 10)
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 100
+    return c.json({ events: registry.recentEvents(limit) })
   })
 
   // Registry stats

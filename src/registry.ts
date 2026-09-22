@@ -28,6 +28,16 @@ export class VesselRegistry {
   /** vesselId -> VesselRegistration */
   private vessels = new Map<string, VesselRegistration>()
 
+  /**
+   * REGISTRANT ATTRIBUTION (registration rows recorded nothing about the
+   * caller). Size-bounded in-memory ring of registration events; discovery
+   * writes no files today, so exposure is recentEvents() plus the last_writer
+   * field echoed on vesselCapability responses. Fail-open by construction:
+   * recording never throws into the registration path.
+   */
+  private regEvents: Array<Record<string, unknown>> = []
+  private static readonly REG_EVENT_LIMIT = 500
+
   /** shape -> Set of vesselIds that can resolve it */
   private shapeIndex = new Map<string, Set<string>>()
 
@@ -577,6 +587,43 @@ export class VesselRegistry {
       clearInterval(this.cleanupInterval)
       this.cleanupInterval = undefined
     }
+  }
+
+  /**
+   * Record who wrote (or tried to write) a registration row. Fail-open: never
+   * throws into the register path. For kind 'registered' it stamps last_writer
+   * onto the live row (if the row survived peer dedup) and always appends a
+   * bounded event to the in-memory registration event log.
+   */
+  recordWriter(
+    vesselId: string,
+    info: { remote_addr?: string; key_id?: string; user_id?: string; org_id?: string; claimed_vessel_id?: string; endpoint?: string; kind?: string; detail?: string },
+  ): void {
+    try {
+      const at = Date.now()
+      const kind = info.kind ?? "registered"
+      const row = this.vessels.get(vesselId)
+      if (row && kind === "registered") {
+        row.last_writer = {
+          remote_addr: info.remote_addr,
+          key_id: info.key_id,
+          user_id: info.user_id,
+          org_id: info.org_id,
+          claimed_vessel_id: info.claimed_vessel_id ?? vesselId,
+          at,
+        }
+      }
+      this.regEvents.push({ at, vesselId, ...info, kind })
+      if (this.regEvents.length > VesselRegistry.REG_EVENT_LIMIT) {
+        this.regEvents.splice(0, this.regEvents.length - VesselRegistry.REG_EVENT_LIMIT)
+      }
+    } catch { /* attribution is best-effort; never block registration */ }
+  }
+
+  /** Most recent registration events (newest last), bounded by the ring size. */
+  recentEvents(limit = 100): Array<Record<string, unknown>> {
+    const n = Math.max(1, Math.min(limit, VesselRegistry.REG_EVENT_LIMIT))
+    return this.regEvents.slice(-n)
   }
 
   // --- Private helpers ---
