@@ -10,6 +10,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
+import { heapStats } from "bun:jsc"
 import { createServer, registry } from "../../src/index"
 import { setIdentityValidator } from "../../src/middleware/auth"
 import type { Hono } from "hono"
@@ -259,11 +260,13 @@ describe("Security Audit: Discovery Vessel", () => {
     })
 
     test("handle memory exhaustion attempts", async () => {
-      // Force a full collection before each reading so the delta measures RETAINED memory, not
-      // when the collector last ran. Without it the result depended on which test files ran
-      // earlier in the same process (209 MB alone vs 152 MB after the full suite on one node).
+      // Measure RETAINED memory: force a full collection, then read JSC's live heap size.
+      // process.memoryUsage().heapUsed is not a retention measure under Bun: it does not fall
+      // when objects are released, and it missed 250 MB of planted retained strings entirely,
+      // so the delta depended on which files ran earlier (209 MB alone vs 152 MB after the full
+      // suite on one node). heapStats().heapSize tracks retention (250 MB held -> 0.2 MB freed).
       Bun.gc(true)
-      const memBefore = process.memoryUsage().heapUsed
+      const memBefore = heapStats().heapSize
 
       // Try to exhaust memory with large metadata
       const largeMetadata = {
@@ -290,7 +293,7 @@ describe("Security Audit: Discovery Vessel", () => {
       const results = await Promise.allSettled(promises)
 
       Bun.gc(true)
-      const memAfter = process.memoryUsage().heapUsed
+      const memAfter = heapStats().heapSize
       const memDelta = (memAfter - memBefore) / 1024 / 1024 // MB
 
       console.log(`\n✅ Memory Exhaustion Protection:`)
