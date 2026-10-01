@@ -259,6 +259,10 @@ describe("Security Audit: Discovery Vessel", () => {
     })
 
     test("handle memory exhaustion attempts", async () => {
+      // Force a full collection before each reading so the delta measures RETAINED memory, not
+      // when the collector last ran. Without it the result depended on which test files ran
+      // earlier in the same process (209 MB alone vs 152 MB after the full suite on one node).
+      Bun.gc(true)
       const memBefore = process.memoryUsage().heapUsed
 
       // Try to exhaust memory with large metadata
@@ -285,6 +289,7 @@ describe("Security Audit: Discovery Vessel", () => {
       // Should handle without crashing
       const results = await Promise.allSettled(promises)
 
+      Bun.gc(true)
       const memAfter = process.memoryUsage().heapUsed
       const memDelta = (memAfter - memBefore) / 1024 / 1024 // MB
 
