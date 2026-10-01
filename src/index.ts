@@ -13,6 +13,7 @@ import { logger } from "hono/logger"
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
 import { resolve, getResolvableShapes } from "./resolvers"
 import { metricsRegistry } from "./metrics"
+import { postToPeer } from "./peer-credentials"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import type {
   DiscoveryPointer,
@@ -49,14 +50,11 @@ function currentPeerEndpoints(): string[] {
 const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "2", 10)
 // Location independence (law 11): a PEER discovery endpoint is the federation door to
 // ANOTHER substrate (e.g. the hub), a DIFFERENT trust domain. The caller's own token is
-// issued by THIS substrate's identity and is invalid at the peer (the peer validates a
-// key claiming the local issuer against its OWN HMAC secret), so forwarding it 401s and
-// the fan-out silently returns nothing. Use HUB_API_KEY — a peer/hub-issued service
-// credential — for cross-domain peer hops; fall back to the caller's header when unset
-// (same-domain / co-issued peers, unchanged).
-function peerAuthHeader(authHeader: string | undefined): string | undefined {
-  return process.env.HUB_API_KEY ? `ApiKey ${process.env.HUB_API_KEY}` : authHeader
-}
+// issued by THIS substrate's identity and is invalid at the peer, and two peers that
+// sign keys differently cannot share one credential either. Each peer's credential is
+// chosen per peer by peer-credentials.ts (PEER_CREDENTIALS maps peer → env var NAME;
+// unmapped peers keep the HUB_API_KEY-else-caller-header fallback), and every peer
+// request is sent by its postToPeer — the one place a peer request is built.
 const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "union").toLowerCase()
 
 async function forwardToPeers(
@@ -70,18 +68,8 @@ async function forwardToPeers(
   const seen = new Set<string>()
   await Promise.all(peers.map(async (peer) => {
     try {
-      const res = await fetch(`${peer.replace(/\/$/, "")}/resolve`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
-          "X-Discovery-Depth": String(depth + 1),
-          ...((peerAuthHeader(authHeader)) ? { Authorization: peerAuthHeader(authHeader)! } : {}),
-        },
-        body: JSON.stringify({ pointer }),
-        signal: AbortSignal.timeout(5000),
-      })
-      if (!res.ok) return
+      const res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 5000 })
+      if (!res || !res.ok) return // undefined = mapped credential unavailable (fail closed)
       const data = (await res.json()) as { content?: { vessels?: Array<Record<string, unknown>> } }
       for (const v of data.content?.vessels ?? []) {
         const id = String(v.vesselId ?? "")
@@ -110,18 +98,8 @@ async function forwardResolveToPeers(
   if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return undefined
   for (const peer of peers) {
     try {
-      const res = await fetch(`${peer.replace(/\/$/, "")}/resolve`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Increment the hop count so a forwarded query can't recurse past MAX_PEER_DEPTH.
-          "X-Discovery-Depth": String(depth + 1),
-          ...((peerAuthHeader(authHeader)) ? { Authorization: peerAuthHeader(authHeader)! } : {}),
-        },
-        body: JSON.stringify({ pointer }),
-        signal: AbortSignal.timeout(10000),
-      })
-      if (!res.ok) continue // 404 / error at this peer — try the next
+      const res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 10000 })
+      if (!res || !res.ok) continue // 404 / error / mapped credential unavailable — try the next
       const body = await res.json()
       return { body, status: res.status }
     } catch { /* peer unreachable / timed out — try the next peer */ }
