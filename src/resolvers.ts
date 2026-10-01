@@ -17,6 +17,7 @@ import type {
   VesselEndpointResult,
   VesselHealthResult,
   VesselRegistryResult,
+  VesselOrigin,
   ResolverResult
 } from "./types"
 
@@ -126,10 +127,20 @@ export async function resolveVesselCapability(
       auth_delegation_mode: v.auth_delegation_mode,
       // Self-authored distribution/routing policy — echoed so federated routers
       // and the transport ingress pick can honor it (not only discovery /resolve).
-      distribution_policy: v.distribution_policy
+      distribution_policy: v.distribution_policy,
+      // Provenance, stamped HERE from the row's own registry and never copied from it: a row
+      // in this node's registry is "local", unless it is a libp2p facade for a vessel served
+      // elsewhere ("overlay"). Peer rows are stamped where they are merged (index.ts).
+      origin: localOrigin(v)
     })),
     found: vessels.length > 0
   }
+}
+
+/** The origin of a row in THIS node's registry: a libp2p row is a facade for a vessel served
+ *  elsewhere over the overlay, so only a plain registration is "local". */
+export function localOrigin(v: { protocol?: string }): VesselOrigin {
+  return v.protocol === "libp2p" ? "overlay" : "local"
 }
 
 /**
@@ -248,7 +259,8 @@ export async function resolveVesselRegistry(
       // the canonical registry dump so the "p2p + own-rules" bar is observable.
       distribution_policy: v.distribution_policy,
       libp2p_peer_id: v.libp2p_peer_id,
-      libp2p_multiaddr: v.libp2p_multiaddr
+      libp2p_multiaddr: v.libp2p_multiaddr,
+      origin: localOrigin(v)
     })),
     totalCount: vessels.length
   }

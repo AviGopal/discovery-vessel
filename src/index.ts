@@ -13,7 +13,7 @@ import { logger } from "hono/logger"
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
 import { resolve, getResolvableShapes } from "./resolvers"
 import { metricsRegistry } from "./metrics"
-import { postToPeer } from "./peer-credentials"
+import { postToPeer, normalizePeerKey } from "./peer-credentials"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import type {
   DiscoveryPointer,
@@ -77,11 +77,30 @@ async function forwardToPeers(
         if (id) seen.add(id)
         // Tag provenance so callers (and learning) can distinguish a local producer
         // from a peer-resolved one — the discoveredVia:"peer" enum already exists in types.
-        merged.push({ ...v, discoveredVia: "peer", peerEndpoint: peer })
+        merged.push(stampPeerRow(v, peer))
       }
     } catch { /* peer unreachable / timed out — skip it; the local result stands */ }
   }))
   return merged
+}
+
+// PROVENANCE IS STAMPED ON RECEIVE, NEVER TRUSTED FROM THE SENDER. A peer row's `origin` is
+// overwritten with the peer WE asked ("peer:<its http origin>"), whatever origin or substrate
+// field the peer's row carried: a peer that writes origin:"local" on its rows must not become
+// one of this substrate's own producers, because readers of substrate-local policy (autonomy
+// scope, spend envelope) take only their own substrate's producers by this field. What the peer
+// itself said about the row is kept as `origin_upstream`, a recorded claim: "local" means the
+// asked peer serves it from its own registry, anything else means the row was relayed through
+// it (a peer's peer). Exported for tests.
+export function stampPeerRow(v: Record<string, unknown>, peer: string): Record<string, unknown> {
+  const claimed = typeof v.origin === "string" ? v.origin : null
+  return {
+    ...v,
+    discoveredVia: "peer",
+    peerEndpoint: peer,
+    origin: `peer:${normalizePeerKey(peer) ?? peer.trim().replace(/\/+$/, "")}`,
+    origin_upstream: claimed,
+  }
 }
 
 // General-shape fleet resolution (law 11 / location-transparency): on a LOCAL

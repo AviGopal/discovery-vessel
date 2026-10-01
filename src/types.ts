@@ -365,7 +365,24 @@ export interface VesselCapability {
   /** Self-authored distribution/routing policy the caller should honor when
    *  this shape has multiple producers (see DistributionPolicy). */
   distribution_policy?: DistributionPolicy
+
+  // --- Provenance, stamped by the discovery that ANSWERS (never trusted from a peer) ---
+  /** Where THIS discovery got the row. "local": a plain registration in this node's own
+   *  registry. "overlay": a libp2p row in this node's registry (a facade for a vessel served
+   *  elsewhere). "peer:<origin of the peer discovery we asked>": merged from a peer's answer;
+   *  any origin the peer's row carried is overwritten, never kept. Readers that must take only
+   *  their own substrate's producers (policy, budget, containment) key on this field; a row
+   *  without it came from an older discovery and is not provably anyone's. */
+  origin?: VesselOrigin
+  /** For a peer row: the origin the ASKED peer reported for it (its own claim, recorded as data,
+   *  never used as `origin`). "local" means the asked peer serves it from its own registry;
+   *  anything else (another peer:, overlay, or null when the peer stamps nothing) means the row
+   *  was relayed through that peer. Absent on rows this discovery stamped "local"/"overlay". */
+  origin_upstream?: string | null
 }
+
+/** "local" | "overlay" | `peer:<http(s) origin>` — see VesselCapability.origin. */
+export type VesselOrigin = "local" | "overlay" | `peer:${string}`
 
 export interface VesselCapabilityResult {
   shape: string
@@ -412,6 +429,7 @@ export interface VesselRegistryResult {
     distribution_policy?: DistributionPolicy
     libp2p_peer_id?: string
     libp2p_multiaddr?: string[]
+    origin?: VesselOrigin
   }>
   totalCount: number
 }
