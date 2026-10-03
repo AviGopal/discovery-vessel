@@ -65,23 +65,107 @@ async function forwardToPeers(
   const peers = currentPeerEndpoints()
   if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return []
   const merged: Array<Record<string, unknown>> = []
+  // Dedupe key is (stamped origin, vesselId): two peers may both serve a vessel under the
+  // same bare id (a substrate's first node and a foreign hub both run concept-db-local), and
+  // whichever answered first must not shadow the other. Only a repeat inside ONE peer's answer
+  // collapses. Local-over-peer precedence is applied later, in the /resolve merge.
   const seen = new Set<string>()
   await Promise.all(peers.map(async (peer) => {
+    let res: Response | undefined
     try {
-      const res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 5000 })
-      if (!res || !res.ok) return // undefined = mapped credential unavailable (fail closed)
-      const data = (await res.json()) as { content?: { vessels?: Array<Record<string, unknown>> } }
-      for (const v of data.content?.vessels ?? []) {
-        const id = String(v.vesselId ?? "")
-        if (id && seen.has(id)) continue
-        if (id) seen.add(id)
-        // Tag provenance so callers (and learning) can distinguish a local producer
-        // from a peer-resolved one — the discoveredVia:"peer" enum already exists in types.
-        merged.push(stampPeerRow(v, peer))
-      }
-    } catch { /* peer unreachable / timed out — skip it; the local result stands */ }
+      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 5000 })
+    } catch (err) {
+      const name = (err as Error)?.name ?? "Error"
+      const cls = name === "TimeoutError" || name === "AbortError" ? "timeout" : "unreachable"
+      notePeerFanout(peer, cls, `${cls} (${name}: ${String((err as Error)?.message ?? err)})`)
+      return // the local result stands
+    }
+    if (!res) { notePeerFanout(peer, "not_contacted", "not contacted: its mapped credential is unavailable"); return } // fail closed
+    if (!res.ok) {
+      const cls = `http_${Math.floor(res.status / 100)}xx`
+      notePeerFanout(peer, cls, `HTTP ${res.status} (${cls})`)
+      return
+    }
+    let data: { content?: { vessels?: Array<Record<string, unknown>> } }
+    try {
+      data = (await res.json()) as typeof data
+    } catch (err) {
+      notePeerFanout(peer, "bad_body", `HTTP ${res.status} with an unparseable body (${(err as Error)?.name ?? "Error"})`)
+      return
+    }
+    notePeerFanout(peer, "ok", "")
+    for (const v of data.content?.vessels ?? []) {
+      // Tag provenance so callers (and learning) can distinguish a local producer
+      // from a peer-resolved one — the discoveredVia:"peer" enum already exists in types.
+      // Qualify BEFORE dedupe: the stamped origin names the peer we asked.
+      const row = stampPeerRow(v, peer)
+      const id = String(v.vesselId ?? "")
+      const key = `${String(row.origin)}|${id}`
+      if (id && seen.has(key)) continue
+      if (id) seen.add(key)
+      merged.push(row)
+    }
   }))
   return merged
+}
+
+// FAILED PEERS ARE NAMED, ONCE PER CHANGE. A peer that errors, times out or answers non-2xx
+// used to vanish into an empty catch: from this side a 401ing or dead peer looked exactly like a
+// peer with nothing to offer. One line per (peer, outcome class) CHANGE — a peer stuck failing
+// the same way does not repeat itself on every lookup, a change of class (or a recovery) is
+// logged. Lines carry the peer's http origin (userinfo stripped by normalizePeerKey) and the
+// status, never a credential. In-memory, keyed by configured peers only.
+const peerFanoutOutcome = new Map<string, string>()
+function notePeerFanout(peer: string, cls: string, detail: string): void {
+  const key = normalizePeerKey(peer) ?? "<unparseable peer endpoint>"
+  const prev = peerFanoutOutcome.get(key)
+  if (prev === cls) return
+  peerFanoutOutcome.set(key, cls)
+  if (cls === "ok") {
+    if (prev !== undefined) console.warn(`[discovery] peer fanout to ${key} recovered (was ${prev})`)
+    return
+  }
+  console.warn(`[discovery] peer fanout to ${key} failed: ${detail}`)
+}
+
+// A PEER'S LOOPBACK IS NOT OURS. A peer discovery answers with the rows of ITS registry, whose
+// endpoints are often in-container loopback (http://127.0.0.1:8260) plus the host-published
+// public_endpoint it derived (http://127.0.0.1:18260, see derivePublicEndpoint). Dialed from
+// here, either names THIS node's own loopback. The peer is reachable at the host we asked it
+// on, so a loopback endpoint / public_endpoint / absolute resolve_endpoint is re-homed onto the
+// peer URL's host with the row's PUBLIC port. With no public port to go on the row is left as
+// is and marked endpoint_unreachable. libp2p facade rows are dialed over the overlay and are
+// never rewritten; local rows never pass through here.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
+function httpUrl(s: unknown): URL | null {
+  if (typeof s !== "string") return null
+  try {
+    const u = new URL(s)
+    return u.protocol === "http:" || u.protocol === "https:" ? u : null
+  } catch { return null }
+}
+const isLoopbackUrl = (u: URL | null): u is URL => !!u && LOOPBACK_HOSTS.has(u.hostname)
+function rehome(original: string, url: URL, host: string, protocol: string, port: string): string {
+  const u = new URL(url.href)
+  u.protocol = protocol
+  u.hostname = host
+  u.port = port
+  const out = u.toString()
+  return original.endsWith("/") || u.pathname !== "/" || u.search ? out : out.replace(/\/$/, "")
+}
+function rehomeLoopbackPeerRow(row: Record<string, unknown>, peer: string): Record<string, unknown> {
+  if (row.protocol === "libp2p") return row
+  const ep = httpUrl(row.endpoint), pub = httpUrl(row.public_endpoint), re = httpUrl(row.resolve_endpoint)
+  const epLoop = isLoopbackUrl(ep), pubLoop = isLoopbackUrl(pub), reLoop = isLoopbackUrl(re)
+  if (!epLoop && !pubLoop && !reLoop) return row
+  const peerUrl = httpUrl(normalizePeerKey(peer))
+  if (!peerUrl || !pub) return { ...row, endpoint_unreachable: true }
+  const out: Record<string, unknown> = { ...row }
+  const host = peerUrl.hostname
+  if (epLoop) out.endpoint = rehome(String(row.endpoint), ep, host, pub.protocol, pub.port)
+  if (pubLoop) out.public_endpoint = rehome(String(row.public_endpoint), pub, host, pub.protocol, pub.port)
+  if (reLoop) out.resolve_endpoint = rehome(String(row.resolve_endpoint), re, host, pub.protocol, pub.port)
+  return out
 }
 
 // PROVENANCE IS STAMPED ON RECEIVE, NEVER TRUSTED FROM THE SENDER. A peer row's `origin` is
@@ -95,7 +179,7 @@ async function forwardToPeers(
 export function stampPeerRow(v: Record<string, unknown>, peer: string): Record<string, unknown> {
   const claimed = typeof v.origin === "string" ? v.origin : null
   return {
-    ...v,
+    ...rehomeLoopbackPeerRow(v, peer),
     discoveredVia: "peer",
     peerEndpoint: peer,
     origin: `peer:${normalizePeerKey(peer) ?? peer.trim().replace(/\/+$/, "")}`,
