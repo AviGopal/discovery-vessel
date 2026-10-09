@@ -140,8 +140,11 @@ export const PUBLIC_PATH_PREFIXES: readonly string[] = [
  * environment after start. Reading per call costs a property lookup and makes
  * the value honest.
  */
-function identityVesselUrl(): string {
-  return process.env.IDENTITY_VESSEL_URL ?? "https://identity.metabob.com"
+function identityVesselUrl(): string | null {
+  // No built-in fallback: the presented key is sent wherever this points and
+  // the answer is trusted, so an unconfigured endpoint means no validation at
+  // all (fail closed via the unreachable path), never a default host.
+  return process.env.IDENTITY_VESSEL_URL || null
 }
 
 // Short-TTL validation cache: discovery sits on every vessel's register/
@@ -170,7 +173,9 @@ async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | n
     return cached.ctx
   }
   try {
-    const res = await fetch(`${identityVesselUrl()}/v1/auth/resolve`, {
+    const base = identityVesselUrl()
+    if (!base) throw new Error("IDENTITY_VESSEL_URL is not configured")
+    const res = await fetch(`${base}/v1/auth/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -343,7 +348,7 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
     const failure = lastValidationFailure()
     const detail = lastValidationFailureDetail()
     console.warn(
-      `[discovery] 401 ${c.req.method} ${normalisedPath} — ${failure}: ${detail} (identity=${identityVesselUrl()})`
+      `[discovery] 401 ${c.req.method} ${normalisedPath} — ${failure}: ${detail} (identity=${identityVesselUrl() ?? "unset"})`
     )
     return c.json(
       {
