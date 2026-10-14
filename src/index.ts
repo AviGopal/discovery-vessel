@@ -276,10 +276,18 @@ export function createServer() {
       process.env.DISCOVERY_PUBLIC_URL ??
       (publicIp ? `http://${publicIp}:${process.env.DISCOVERY_PUBLIC_PORT ?? "18100"}` : undefined) ??
       ""
+    // The trace store a joiner writes to. Without it a joiner derived it from the discovery port by a fixed
+    // offset, which cannot work behind a TLS front (https://hub:8443 has no arithmetic sibling for the trace store),
+    // so a token join was limited to the plain-HTTP 18xxx block. Same precedence as the two above.
+    const activity_endpoint =
+      process.env.ACTIVITY_PUBLIC_URL ??
+      (publicIp ? `http://${publicIp}:${process.env.ACTIVITY_PUBLIC_PORT ?? "18080"}` : undefined) ??
+      ""
     return c.json({
       relay_multiaddrs,
       identity_endpoint,
       discovery_endpoint,
+      activity_endpoint,
       // A client SHOULD reserve a circuit on the relay and dial vessels via their
       // libp2p_multiaddr, falling back to direct HTTP only when no circuit exists.
       prefer_transport: "libp2p",
