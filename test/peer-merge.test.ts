@@ -221,6 +221,32 @@ describe("peer merge - loopback endpoints are rewritten onto the peer host", () 
     expect(isLoopback(buildResolveUrl(row))).toBe(false)
   })
 
+  it("MUST-FAIL: a peer asked on our own internal discovery port keeps the row's internal ports (shared-network topology)", () => {
+    // A node asks its peer at http://<container>:8100 on the shared network; re-homing onto the public 18260 named a
+    // port it cannot reach, so its concept recall failed 720 of 720.
+    const saved = process.env.DISCOVERY_PORT
+    process.env.DISCOVERY_PORT = "8100"
+    try {
+      const row = stampPeerRow({
+        vesselId: "concept-db-local", endpoint: "http://127.0.0.1:8260", public_endpoint: "http://127.0.0.1:18260",
+        resolve_endpoint: "http://127.0.0.1:8260/v2/impulses/resolve",
+      }, "http://node1-internal.test:8100")
+      expect(row.endpoint).toBe("http://node1-internal.test:8260")
+      expect(row.resolve_endpoint).toBe("http://node1-internal.test:8260/v2/impulses/resolve")
+      expect(row.public_endpoint).toBe("http://node1-internal.test:18260")
+      expect(row.endpoint_unreachable).toBeUndefined()
+      // asked internally with no public port: still dialable on the internal port
+      const nopub = stampPeerRow({ vesselId: "y", endpoint: "http://127.0.0.1:8261" }, "http://node1-internal.test:8100")
+      expect(nopub.endpoint).toBe("http://node1-internal.test:8261")
+      expect(nopub.endpoint_unreachable).toBeUndefined()
+      // CONTROL with the env set: a peer asked on its published port still gets the public port
+      const published = stampPeerRow({ vesselId: "z", endpoint: "http://127.0.0.1:8260", public_endpoint: "http://127.0.0.1:18260" }, "http://node1-pub.test:18100")
+      expect(published.endpoint).toBe("http://node1-pub.test:18260")
+    } finally {
+      if (saved === undefined) delete process.env.DISCOVERY_PORT; else process.env.DISCOVERY_PORT = saved
+    }
+  })
+
   it("a loopback peer row with no public port is left as is and marked endpoint_unreachable", () => {
     const row = stampPeerRow({ vesselId: "x", endpoint: "http://[::1]:8260" }, "http://node1-nopub.test:18100")
     expect(row.endpoint).toBe("http://[::1]:8260")

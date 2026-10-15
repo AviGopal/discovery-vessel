@@ -133,8 +133,12 @@ function notePeerFanout(peer: string, cls: string, detail: string): void {
 // public_endpoint it derived (http://127.0.0.1:18260, see derivePublicEndpoint). Dialed from
 // here, either names THIS node's own loopback. The peer is reachable at the host we asked it
 // on, so a loopback endpoint / public_endpoint / absolute resolve_endpoint is re-homed onto the
-// peer URL's host with the row's PUBLIC port. With no public port to go on the row is left as
-// is and marked endpoint_unreachable. libp2p facade rows are dialed over the overlay and are
+// peer URL's host with the row's PUBLIC port, UNLESS the peer was asked on our own internal discovery
+// port: then the peer was dialed in the container port space (the shared-network topology, a peer
+// asked at http://<container>:8100), so endpoint / resolve_endpoint keep their OWN internal ports and
+// only public_endpoint keeps the public one. Re-homing onto the public port there named a port the
+// asker cannot reach (a second node's concept recall: 0 of 720). With no public port and no internal
+// match the row is left as is and marked endpoint_unreachable. libp2p facade rows are dialed over the overlay and are
 // never rewritten; local rows never pass through here.
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
 function httpUrl(s: unknown): URL | null {
@@ -153,18 +157,28 @@ function rehome(original: string, url: URL, host: string, protocol: string, port
   const out = u.toString()
   return original.endsWith("/") || u.pathname !== "/" || u.search ? out : out.replace(/\/$/, "")
 }
+/** This discovery's own internal listen port (bootstrap identity, read at use); null when unset. */
+const ownInternalPort = (): string | null => process.env.DISCOVERY_PORT ?? process.env.PORT ?? null
 function rehomeLoopbackPeerRow(row: Record<string, unknown>, peer: string): Record<string, unknown> {
   if (row.protocol === "libp2p") return row
   const ep = httpUrl(row.endpoint), pub = httpUrl(row.public_endpoint), re = httpUrl(row.resolve_endpoint)
   const epLoop = isLoopbackUrl(ep), pubLoop = isLoopbackUrl(pub), reLoop = isLoopbackUrl(re)
   if (!epLoop && !pubLoop && !reLoop) return row
   const peerUrl = httpUrl(normalizePeerKey(peer))
-  if (!peerUrl || !pub) return { ...row, endpoint_unreachable: true }
+  const own = ownInternalPort()
+  const askedInternally = !!peerUrl && own !== null && peerUrl.port === own
+  if (!peerUrl || (!pub && !askedInternally)) return { ...row, endpoint_unreachable: true }
   const out: Record<string, unknown> = { ...row }
   const host = peerUrl.hostname
-  if (epLoop) out.endpoint = rehome(String(row.endpoint), ep, host, pub.protocol, pub.port)
-  if (pubLoop) out.public_endpoint = rehome(String(row.public_endpoint), pub, host, pub.protocol, pub.port)
-  if (reLoop) out.resolve_endpoint = rehome(String(row.resolve_endpoint), re, host, pub.protocol, pub.port)
+  if (askedInternally) {
+    if (epLoop) out.endpoint = rehome(String(row.endpoint), ep, host, ep.protocol, ep.port)
+    if (pubLoop) out.public_endpoint = rehome(String(row.public_endpoint), pub, host, pub.protocol, pub.port)
+    if (reLoop) out.resolve_endpoint = rehome(String(row.resolve_endpoint), re, host, re.protocol, re.port)
+    return out
+  }
+  if (epLoop) out.endpoint = rehome(String(row.endpoint), ep, host, pub!.protocol, pub!.port)
+  if (pubLoop) out.public_endpoint = rehome(String(row.public_endpoint), pub, host, pub!.protocol, pub!.port)
+  if (reLoop) out.resolve_endpoint = rehome(String(row.resolve_endpoint), re, host, pub!.protocol, pub!.port)
   return out
 }
 
