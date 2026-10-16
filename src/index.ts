@@ -190,6 +190,31 @@ function rehomeLoopbackPeerRow(row: Record<string, unknown>, peer: string): Reco
 // itself said about the row is kept as `origin_upstream`, a recorded claim: "local" means the
 // asked peer serves it from its own registry, anything else means the row was relayed through
 // it (a peer's peer). Exported for tests.
+/**
+ * Is THIS node's federation egress live? Read at use time from what already exists (no new signal): the transport's own
+ * self-row in this registry (a local, non-mirror protocol:libp2p row advertising federation_probe, kept fresh by its
+ * 120 s heartbeat; expiresAt in the future), AND its endpoint's /health not REFUSING a connection (the 400 ms
+ * dead-row pattern resolvers.ts already uses: fail-open on anything but a refusal, since slow is not dead).
+ * The probe is injectable for tests.
+ */
+export async function localEgressLiveness(
+  rows: Array<Record<string, unknown>>,
+  probe: (url: string) => Promise<void> = async (url) => { await fetch(url, { signal: AbortSignal.timeout(400) }) },
+  now: number = Date.now(),
+): Promise<{ live: boolean; reason: string }> {
+  const self = rows.find((r) => r.protocol === "libp2p" && r.discoveredVia !== "peer" && !String(r.vesselId ?? "").includes("@")
+    && Array.isArray(r.shapes) && (r.shapes as unknown[]).includes("federation_probe"))
+  if (!self) return { live: false, reason: "no local federation transport registered (masked, stopped or not deployed)" }
+  if (typeof self.expiresAt === "number" && self.expiresAt <= now) return { live: false, reason: "the local federation transport's registration expired" }
+  const ep = typeof self.endpoint === "string" ? self.endpoint.replace(/\/+$/, "") : ""
+  if (!ep) return { live: true, reason: "registered (no endpoint to probe)" }
+  try { await probe(`${ep}/health`); return { live: true, reason: "registered and answering" } }
+  catch (e) {
+    const msg = String((e as Error)?.message ?? e)
+    return /refused|ECONNREFUSED|Unable to connect|ConnectionRefused/i.test(msg) ? { live: false, reason: "the local federation egress refused the connection" } : { live: true, reason: "registered (probe inconclusive, fail-open)" }
+  }
+}
+
 export function stampPeerRow(v: Record<string, unknown>, peer: string): Record<string, unknown> {
   const claimed = typeof v.origin === "string" ? v.origin : null
   return {
@@ -397,6 +422,14 @@ export function createServer() {
               cap.found = true
             }
           }
+        }
+        // REACHABILITY (a): a libp2p row is dialled through THIS node's federation egress. When that egress is not live
+        // the row is stamped egress_unreachable (never dropped), so a caller skips it and prefers a local producer.
+        // Recomputed on every answer: a transport that comes back clears the stamp on the next call.
+        const viaEgress = (cap.vessels ?? []).filter((v) => v.protocol === "libp2p")
+        if (viaEgress.length > 0) {
+          const egress = await localEgressLiveness(registry.list() as unknown as Array<Record<string, unknown>>)
+          if (!egress.live) for (const v of viaEgress) { v.egress_unreachable = true; v.egress_unreachable_reason = egress.reason }
         }
       }
 
