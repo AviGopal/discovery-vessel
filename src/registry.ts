@@ -17,6 +17,7 @@ import {
 } from "./types"
 import { discoveryMetrics } from "./metrics"
 import { publishVesselEvent } from "./event-bus"
+import { LearnedDescriptions, type LearnedEntry } from "./learned-descriptions"
 
 /** Default TTL for vessel registrations (5 minutes) */
 const DEFAULT_TTL_MS = 5 * 60 * 1000
@@ -128,7 +129,7 @@ export class VesselRegistry {
    * are dropped at read time for shapes no longer in ANY live vessel's `shapes`
    * (self-cleaning), so this map can hold stale keys but never leaks them.
    */
-  private learnedDescriptions = new Map<string, { description: string; source: string; at: number }>()
+  private learnedDescriptions = new LearnedDescriptions()
 
   /** Cleanup interval handle */
   private cleanupInterval?: ReturnType<typeof setInterval>
@@ -488,12 +489,11 @@ export class VesselRegistry {
         merged[shape] = desc.trim()
       }
     }
-    // Fill remaining gaps with LEARNED descriptions. Advertised always wins
-    // (we skip any shape already in `merged`). Self-cleaning: only fill for a
-    // shape that some live, accessible vessel still advertises in `shapes`.
-    for (const [shape, entry] of this.learnedDescriptions) {
+    // Fill remaining gaps with LEARNED descriptions. Advertised always wins (we skip any shape already in `merged`).
+    // A learned entry is served while it is CLAIMED: a live, accessible vessel lists the shape, or the entry names the
+    // template that produces it (a minted shape no vessel advertises); a retired entry is kept but not served.
+    for (const [shape, entry] of this.learnedDescriptions.served(liveShapes)) {
       if (merged[shape]) continue // advertised wins
-      if (!liveShapes.has(shape)) continue // shape gone from the fleet — skip (and prune below)
       merged[shape] = entry.description
     }
     return merged
@@ -508,29 +508,13 @@ export class VesselRegistry {
    * Also opportunistically prunes learned entries for shapes that are no longer
    * advertised by ANY live vessel, so the map self-cleans over time.
    */
-  setLearnedDescription(shape: string, description: string, source = "auto"):
-    { description: string; source: string; at: number } | null {
-    if (typeof shape !== "string" || shape.trim().length === 0) return null
-    if (typeof description !== "string" || description.trim().length === 0) return null
-    const entry = { description: description.trim(), source, at: Date.now() }
-    this.learnedDescriptions.set(shape.trim(), entry)
-    this.pruneLearnedDescriptions()
-    return entry
+  setLearnedDescription(shape: string, description: string, source = "auto", producedBy?: string): LearnedEntry | null {
+    return this.learnedDescriptions.set(shape, description, source, producedBy)
   }
 
-  /**
-   * Drop learned descriptions for shapes no longer advertised by any live vessel.
-   */
-  private pruneLearnedDescriptions(): void {
-    if (this.learnedDescriptions.size === 0) return
-    const liveShapes = new Set<string>()
-    for (const vessel of this.vessels.values()) {
-      if (this.isExpired(vessel)) continue
-      for (const shape of vessel.shapes) liveShapes.add(shape)
-    }
-    for (const shape of this.learnedDescriptions.keys()) {
-      if (!liveShapes.has(shape)) this.learnedDescriptions.delete(shape)
-    }
+  /** Soft-retire a learned description (kept, no longer served; a later description restores it). */
+  retireLearnedDescription(shape: string): LearnedEntry | null {
+    return this.learnedDescriptions.retire(shape)
   }
 
   /**
@@ -572,8 +556,8 @@ export class VesselRegistry {
 
     if (pruned.length > 0) {
       this.updateMetrics()
-      // Drop learned descriptions for shapes whose last advertising vessel expired.
-      this.pruneLearnedDescriptions()
+      // Learned descriptions are no longer pruned here: an entry is served only while it is claimed (a live vessel
+      // lists the shape, or a template produces it), decided at read time, so an expiry needs no write.
     }
 
     return pruned

@@ -732,14 +732,20 @@ export function createServer() {
   // Auth: requires ApiKey (not in PUBLIC_PATHS, and POST), matching other writes.
   app.post("/registry/shape-descriptions", async (c) => {
     try {
-      const body = await c.req.json<{ shape?: string; description?: string; source?: string }>()
+      const body = await c.req.json<{ shape?: string; description?: string; source?: string; produced_by?: string; retire?: boolean }>()
       const shape = typeof body.shape === "string" ? body.shape.trim() : ""
+      if (shape && body.retire === true) {
+        const retired = registry.retireLearnedDescription(shape)
+        return retired ? c.json({ success: true, shape, retired: true }) : c.json({ error: `no learned description for ${shape}` }, 404)
+      }
       const description = typeof body.description === "string" ? body.description.trim() : ""
       if (!shape || !description) {
         return c.json({ error: "Missing required fields: shape, description" }, 400)
       }
       const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "auto"
-      const entry = registry.setLearnedDescription(shape, description, source)
+      // produced_by: the template that produces this shape (a minted shape no vessel advertises); it keeps the entry claimed.
+      const producedBy = typeof body.produced_by === "string" && body.produced_by.trim() ? body.produced_by.trim() : undefined
+      const entry = registry.setLearnedDescription(shape, description, source, producedBy)
       if (!entry) {
         return c.json({ error: "Invalid shape or description" }, 400)
       }
