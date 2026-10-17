@@ -128,6 +128,7 @@ export async function resolveVesselCapability(
       // Self-authored distribution/routing policy — echoed so federated routers
       // and the transport ingress pick can honor it (not only discovery /resolve).
       distribution_policy: v.distribution_policy,
+      shape_policies: v.shape_policies,
       // Provenance, stamped HERE from the row's own registry and never copied from it: a row
       // in this node's registry is "local", unless it is a libp2p facade for a vessel served
       // elsewhere ("overlay"). Peer rows are stamped where they are merged (index.ts).
@@ -258,6 +259,7 @@ export async function resolveVesselRegistry(
       // Advertise the vessel's own distribution policy + its p2p reachability in
       // the canonical registry dump so the "p2p + own-rules" bar is observable.
       distribution_policy: v.distribution_policy,
+      shape_policies: v.shape_policies,
       libp2p_peer_id: v.libp2p_peer_id,
       libp2p_multiaddr: v.libp2p_multiaddr,
       origin: localOrigin(v)

@@ -16,6 +16,7 @@ import { metricsRegistry } from "./metrics"
 import { postToPeer, normalizePeerKey } from "./peer-credentials"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import { systemOrgId, templateProducesShape } from "./learned-description-writers"
+import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -362,6 +363,13 @@ export function createServer() {
         // from the field OR metadata.duplicate_policy); fall back to raw metadata for
         // any row written before normalization.
         const policyOf = (v: (typeof candidates)[number]) => String(v.distribution_policy ?? ((v.metadata ?? {}) as Record<string, unknown>).duplicate_policy ?? "stateless");
+        // HELD SHAPES (held-shape-routing.ts): a shape a candidate pins per-shape as held data goes to the LOCAL holder row,
+        // or is refused with a named reason; any other shape is picked exactly as before.
+        const held = pickHeldShapeProducer(pointer.type, candidates)
+        if (held.kind === "refused") {
+          console.log(routingRecord(pointer.type, null, held.reason, held.mismatched))
+          return c.json({ error: "held_shape_no_local_holder", shape: pointer.type, detail: held.reason }, 409)
+        }
         const firstPolicyOwner = candidates.find((v) => policyOf(v) === "unique_authoritative" || policyOf(v) === "stateful_data_owner_pin");
         const preferredAuthoritative = firstPolicyOwner && (firstPolicyOwner.metadata ?? {}).authoritative === true ? firstPolicyOwner : null;
         // Prefer a DIRECT (non-libp2p) local producer over a libp2p facade/remote row when both
@@ -369,7 +377,8 @@ export function createServer() {
         // @substrate inbound-advertise facade rows. Policy pins still win first; all-libp2p (genuinely
         // remote-only) falls through to candidates[0] exactly as before.
         const firstDirect = candidates.find((v) => (v as { protocol?: unknown }).protocol !== "libp2p")
-        const target = preferredAuthoritative ?? firstPolicyOwner ?? firstDirect ?? candidates[0]!
+        const target = held.kind === "held" ? held.target : (preferredAuthoritative ?? firstPolicyOwner ?? firstDirect ?? candidates[0]!)
+        console.log(routingRecord(pointer.type, target, held.kind === "held" ? held.reason : preferredAuthoritative ? "authoritative owner" : firstPolicyOwner ? "policy owner" : firstDirect ? "direct local" : "first candidate", held.kind === "held" ? held.mismatched : []))
         const endpoint = target.endpoint
         const resolveEndpoint = target.resolve_endpoint ?? "/v2/impulses/resolve"
         const timeoutMs = target.resolve_timeout_ms ?? 10000
@@ -580,6 +589,8 @@ export function createServer() {
         systemVessel: request.systemVessel,
         metadata: request.metadata,
         distribution_policy: request.distribution_policy,
+        // Per-shape held-data policies (held-shape-routing.ts), validated: only known policy values, string holders.
+        ...(sanitizeShapePolicies(request.shape_policies) ? { shape_policies: sanitizeShapePolicies(request.shape_policies) } : {}),
         codebase: request.codebase,
         // Phase 1: Explicit typed properties
         stateful: request.stateful,

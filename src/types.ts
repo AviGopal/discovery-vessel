@@ -213,6 +213,8 @@ export interface VesselRegistration {
    *  Normalized at write time — defaults to "stateless"; read from this field
    *  or `metadata.duplicate_policy`. Honored by the /resolve producer pick. */
   distribution_policy: DistributionPolicy
+  /** Per-shape policy overrides (held-shape-routing.ts): a shape whose data this producer HOLDS, and which holder. */
+  shape_policies?: Record<string, { distribution_policy: DistributionPolicy; holder?: string }>
 
   /** Additional metadata */
   metadata?: {
@@ -365,6 +367,7 @@ export interface VesselCapability {
   /** Self-authored distribution/routing policy the caller should honor when
    *  this shape has multiple producers (see DistributionPolicy). */
   distribution_policy?: DistributionPolicy
+  shape_policies?: Record<string, { distribution_policy: DistributionPolicy; holder?: string }>
 
   // --- Provenance, stamped by the discovery that ANSWERS (never trusted from a peer) ---
   /** Where THIS discovery got the row. "local": a plain registration in this node's own
@@ -427,6 +430,7 @@ export interface VesselRegistryResult {
     lastSeen: string
     metadata?: Record<string, unknown>
     distribution_policy?: DistributionPolicy
+  shape_policies?: Record<string, { distribution_policy: DistributionPolicy; holder?: string }>
     libp2p_peer_id?: string
     libp2p_multiaddr?: string[]
     origin?: VesselOrigin
@@ -485,6 +489,7 @@ export interface RegisterRequest {
   /** Self-authored distribution/routing policy (see DistributionPolicy). Optional;
    *  normalized to "stateless" at write time. */
   distribution_policy?: DistributionPolicy
+  shape_policies?: Record<string, { distribution_policy: DistributionPolicy; holder?: string }>
   codebase?: {
     accessLevel: "read-write" | "read-only" | "none"
     modifiableBy?: string
