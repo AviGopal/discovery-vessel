@@ -258,6 +258,11 @@ export function setIdentityValidator(validator: IdentityValidator | null): void 
   _identityValidator = validator ?? defaultIdentityValidator
 }
 
+/** Validate a key with the CURRENT validator (the same one the middleware uses; a test's mock included). */
+export function validateApiKeyNow(apiKey: string): Promise<AuthContext | null> {
+  return _identityValidator(apiKey)
+}
+
 // =============================================================================
 // CONTEXT HELPER
 // =============================================================================

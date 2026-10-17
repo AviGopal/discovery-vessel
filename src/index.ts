@@ -15,6 +15,7 @@ import { resolve, getResolvableShapes } from "./resolvers"
 import { metricsRegistry } from "./metrics"
 import { postToPeer, normalizePeerKey } from "./peer-credentials"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
+import { systemOrgId, templateProducesShape } from "./learned-description-writers"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -730,8 +731,15 @@ export function createServer() {
   // describe its OWN resolvers without a vessel owner re-registering. A vessel-
   // ADVERTISED description always wins over a learned one (see getShapeDescriptions).
   // Auth: requires ApiKey (not in PUBLIC_PATHS, and POST), matching other writes.
+  // WRITERS (learned-description-writers.ts): set and retire require the SYSTEM identity (fail closed); a produced_by must
+  // name an existing template that declares the shape.
   app.post("/registry/shape-descriptions", async (c) => {
     try {
+      const auth = getAuthContextOptional(c)
+      const sys = await systemOrgId()
+      if (!sys || !auth || auth.orgId !== sys) {
+        return c.json({ error: "learned shape descriptions are written only by the system identity", reason: sys ? "caller_not_system_org" : "no_validated_system_org" }, 403)
+      }
       const body = await c.req.json<{ shape?: string; description?: string; source?: string; produced_by?: string; retire?: boolean }>()
       const shape = typeof body.shape === "string" ? body.shape.trim() : ""
       if (shape && body.retire === true) {
@@ -745,6 +753,10 @@ export function createServer() {
       const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "auto"
       // produced_by: the template that produces this shape (a minted shape no vessel advertises); it keeps the entry claimed.
       const producedBy = typeof body.produced_by === "string" && body.produced_by.trim() ? body.produced_by.trim() : undefined
+      if (producedBy) {
+        const chk = await templateProducesShape(producedBy, shape)
+        if (!chk.ok) return c.json({ error: chk.reason }, chk.status)
+      }
       const entry = registry.setLearnedDescription(shape, description, source, producedBy)
       if (!entry) {
         return c.json({ error: "Invalid shape or description" }, 400)
