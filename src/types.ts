@@ -387,6 +387,9 @@ export interface VesselCapability {
 /** "local" | "overlay" | `peer:<http(s) origin>` — see VesselCapability.origin. */
 export type VesselOrigin = "local" | "overlay" | `peer:${string}`
 
+/** A resolver's tier as its vessel declares it: what kind of resolver runs the shape (the learning loop's M4 skip reads it). */
+export type ResolverTier = "deterministic" | "pattern" | "llm"
+
 export interface VesselCapabilityResult {
   shape: string
   vessels: VesselCapability[]
@@ -434,6 +437,8 @@ export interface VesselRegistryResult {
     libp2p_peer_id?: string
     libp2p_multiaddr?: string[]
     origin?: VesselOrigin
+    /** The tier the vessel DECLARED for this shape's resolver in its registration `resolvers[]` (absent = undeclared). */
+    resolver_tier?: ResolverTier
   }>
   totalCount: number
 }

@@ -18,6 +18,7 @@ import type {
   VesselHealthResult,
   VesselRegistryResult,
   VesselOrigin,
+  ResolverTier,
   ResolverResult
 } from "./types"
 
@@ -132,10 +133,23 @@ export async function resolveVesselCapability(
       // Provenance, stamped HERE from the row's own registry and never copied from it: a row
       // in this node's registry is "local", unless it is a libp2p facade for a vessel served
       // elsewhere ("overlay"). Peer rows are stamped where they are merged (index.ts).
-      origin: localOrigin(v)
+      origin: localOrigin(v),
+      // The tier the vessel declared for THIS shape's resolver (registration `resolvers[]`), so a dispatcher stamps what
+      // ran instead of a constant. Absent when undeclared; never guessed.
+      ...(declaredResolverTier(v.resolvers, pointer.shape) ? { resolver_tier: declaredResolverTier(v.resolvers, pointer.shape) } : {})
     })),
     found: vessels.length > 0
   }
+}
+
+const RESOLVER_TIERS: ReadonlySet<string> = new Set(["deterministic", "pattern", "llm"])
+/** The tier a vessel declared for `shape` in its registration `resolvers[]`: the entry whose id is the shape (or that
+ *  lists it in `operations`). Only a known tier value counts; anything else (or no entry) is undeclared. */
+export function declaredResolverTier(resolvers: ReadonlyArray<{ id?: unknown; tier?: unknown; operations?: unknown }> | undefined, shape: string): ResolverTier | undefined {
+  if (!Array.isArray(resolvers) || !shape) return undefined
+  const hit = resolvers.find((r) => r && (r.id === shape || (Array.isArray(r.operations) && r.operations.includes(shape))))
+  const tier = typeof hit?.tier === "string" ? hit.tier : ""
+  return RESOLVER_TIERS.has(tier) ? (tier as ResolverTier) : undefined
 }
 
 /** The origin of a row in THIS node's registry: a libp2p row is a facade for a vessel served
