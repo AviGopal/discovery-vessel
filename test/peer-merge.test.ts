@@ -9,8 +9,11 @@
  *      the status, instead of vanishing into an empty catch;
  *   3. a peer row advertising a loopback endpoint names the PEER's loopback, which from here
  *      is our own: it is rewritten onto the peer's host with the row's public port.
+ *   4. a vesselId is a role, not an instance: a peer node's development-vessel, registered
+ *      under the same id as ours, must still appear as a producer when a keyed peer serves it
+ *      from its own registry at its own endpoint on THIS host (same-host peers only).
  * Controls pin what must not move: local rows, libp2p facade rows, non-loopback peer rows,
- * and the existing local-over-peer precedence on a vesselId collision.
+ * local-first order, and the drop of a relayed, unattributed or same-endpoint collision.
  *
  * Peers are stubbed by injecting globalThis.fetch (no sockets, no network): each stub peer
  * is a handler keyed by its http origin.
@@ -129,7 +132,7 @@ describe("peer merge - cross-peer shadowing", () => {
     expect(rows[0]!.endpoint).toBe("http://10.0.0.1:8260")
   })
 
-  it("control - a LOCAL row still wins over a peer row of the same vesselId", async () => {
+  it("control - a LOCAL row still wins over an unattributed peer row of the same vesselId", async () => {
     registry.register({ vesselId: "concept-db-local", vesselName: "concept-db", endpoint: "http://127.0.0.1:8260", shapes: ["conceptQuery"] } as Parameters<typeof registry.register>[0])
     const node1 = "http://node1-prec.test:18100"
     const hub = "http://hub-prec.test:18100"
@@ -143,6 +146,121 @@ describe("peer merge - cross-peer shadowing", () => {
     expect(same[0]!.origin).toBe("local")
     expect(same[0]!.endpoint).toBe("http://127.0.0.1:8260")
     expect(rows.find((r) => r.vesselId === "other-on-hub")!.origin).toBe(`peer:${hub}`)
+  })
+})
+
+describe("peer merge - a peer node's instance of a local vesselId", () => {
+  // Every node registers its development-vessel under the same vesselId. The peer stubs answer
+  // with origin "local": the asked peer's own registry row, which is what makes it a distinct
+  // instance rather than a row relayed through it (possibly our own, echoed back). Same-host
+  // endpoints use the container runtime's name for this host, so no lookup leaves the process.
+  // composeOwnership is per-node state (each node's capacity and owned repos), so the vessel declares it node-distinct
+  // (stateful_data_owner_merge) on its own row and the peer's row; feature_compose is left undeclared.
+  const DV = "development-vessel-local"
+  const SHAPE = "composeOwnership"
+  const SAME_HOST = "http://host.containers.internal"
+  const NODE_DISTINCT = { [SHAPE]: { distribution_policy: "stateful_data_owner_merge" } }
+  const registerLocalDv = (endpoint = "http://localhost:8090", shape_policies: Record<string, unknown> | null = NODE_DISTINCT) =>
+    registry.register({ vesselId: DV, vesselName: "development-vessel", endpoint, shapes: [SHAPE, "feature_compose"], ...(shape_policies ? { shape_policies } : {}) } as Parameters<typeof registry.register>[0])
+  const peerRow = (endpoint: string, extra: Record<string, unknown> = {}) => ({ vesselId: DV, endpoint, origin: "local", shape_policies: NODE_DISTINCT, ...extra })
+
+  it("a same-host peer node's development-vessel on another port appears beside the local one, local first", async () => {
+    registerLocalDv()
+    const peer = "http://peer-dv.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18091`)]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local", `peer:${peer}`])
+    expect(rows[1]!.endpoint).toBe(`${SAME_HOST}:18091`)
+  })
+
+  it("control - a shape the vessel does not declare node-distinct keeps today's local-only answer", async () => {
+    registerLocalDv()
+    const peer = "http://peer-undeclared.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18097`)]) })
+    const rows = (await capability("feature_compose")).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
+  })
+
+  it("control - a peer row declaring the shape node-distinct is dropped when this node's own row does not", async () => {
+    registerLocalDv("http://localhost:8090", null)
+    const peer = "http://peer-onesided.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18098`)]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
+  })
+
+  it("control - a peer instance whose endpoint is NOT on this host is dropped", async () => {
+    registerLocalDv()
+    const peer = "http://peer-remote.test:18100"
+    // A documentation-range address literal: no lookup, and on no network this process attaches to.
+    injectPeers({ [peer]: capabilityAnswer([peerRow("http://[2001:db8::5]:18090")]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
+  })
+
+  it("control - a re-registration from this node replaces its own row instead of adding one", async () => {
+    registerLocalDv("http://localhost:8090")
+    registerLocalDv("http://localhost:8091")
+    const peer = "http://peer-rereg.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18092`)]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.filter((r) => r.origin === "local").map((r) => r.endpoint)).toEqual(["http://localhost:8091"])
+  })
+
+  it("control - a lookup by vesselId still finds the local producer first", async () => {
+    registerLocalDv()
+    const peer = "http://peer-lookup.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18093`)]) })
+    const rows = await capability(SHAPE)
+    const hit = rows.find((r) => r.vesselId === DV)!
+    expect(hit.origin).toBe("local")
+    expect(hit.endpoint).toBe("http://localhost:8090")
+    const res = await app.request(`/vessels/${DV}`, { headers: { Authorization: "ApiKey caller" } })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as Record<string, unknown>).endpoint).toBe("http://localhost:8090")
+  })
+
+  it("control - a same-host colliding row the peer only relays (possibly our own, echoed) is still dropped", async () => {
+    registerLocalDv()
+    const peer = "http://peer-relay.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18094`, { origin: "peer:http://elsewhere.test:18100" })]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
+  })
+
+  // The keyed precondition: a peer is asked only on a request that passed this discovery's ApiKey check, and only
+  // with the credential chosen for that peer (postToPeer).
+  it("control - an unauthenticated capability request is refused before any peer is asked", async () => {
+    registerLocalDv()
+    let asked = 0
+    const peer = "http://peer-unauth.test:18100"
+    injectPeers({ [peer]: () => { asked++; return capabilityAnswer([peerRow(`${SAME_HOST}:18095`)])() } })
+    const res = await app.request("/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pointer: { type: "vesselCapability", shape: SHAPE } }),
+    })
+    expect(res.status).toBe(401)
+    expect(asked).toBe(0)
+  })
+
+  it("control - a peer whose mapped credential is unavailable is never asked, so its colliding row never appears", async () => {
+    registerLocalDv()
+    let asked = 0
+    const peer = "http://peer-nokey.test:18100"
+    injectPeers({ [peer]: () => { asked++; return capabilityAnswer([peerRow(`${SAME_HOST}:18096`)])() } })
+    process.env.PEER_CREDENTIALS = `${peer}=PEER_NOKEY_TEST_API_KEY`
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(asked).toBe(0)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
+  })
+
+  it("control - a true duplicate (same vesselId, same endpoint) is still collapsed to the local row", async () => {
+    registerLocalDv(`${SAME_HOST}:18090`)
+    const peer = "http://peer-dup.test:18100"
+    injectPeers({ [peer]: capabilityAnswer([peerRow(`${SAME_HOST}:18090`)]) })
+    const rows = (await capability(SHAPE)).filter((r) => r.vesselId === DV)
+    expect(rows.map((r) => r.origin)).toEqual(["local"])
   })
 })
 

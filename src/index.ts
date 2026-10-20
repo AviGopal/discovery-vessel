@@ -13,7 +13,8 @@ import { logger } from "hono/logger"
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
 import { resolve, getResolvableShapes } from "./resolvers"
 import { metricsRegistry } from "./metrics"
-import { postToPeer, normalizePeerKey } from "./peer-credentials"
+import { postToPeer, normalizePeerKey, peerAuthorization } from "./peer-credentials"
+import { admitsPeerInstance, endpointIsThisHost } from "./peer-instance"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import { systemOrgId, templateProducesShape } from "./learned-description-writers"
 import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
@@ -59,6 +60,9 @@ const MAX_PEER_DEPTH = parseInt(process.env.MAX_PEER_DEPTH ?? "2", 10)
 // request is sent by its postToPeer — the one place a peer request is built.
 const PEER_FANOUT_MODE = (process.env.PEER_FANOUT_MODE ?? "union").toLowerCase()
 
+/** Peer rows that came back from a peer asked on the keyed path (forwardToPeers). */
+const keyedPeerRows = new WeakSet<object>()
+
 async function forwardToPeers(
   pointer: DiscoveryPointer,
   depth: number,
@@ -96,6 +100,10 @@ async function forwardToPeers(
       return
     }
     notePeerFanout(peer, "ok", "")
+    // Asked on the keyed path (postToPeer sent the credential chosen for this peer): the precondition for admitting
+    // this peer's instance of a local role (peer-instance.ts).
+    const auth = peerAuthorization(peer, authHeader)
+    const keyed = auth.ok && !!auth.header
     for (const v of data.content?.vessels ?? []) {
       // Tag provenance so callers (and learning) can distinguish a local producer
       // from a peer-resolved one — the discoveredVia:"peer" enum already exists in types.
@@ -105,6 +113,7 @@ async function forwardToPeers(
       const key = `${String(row.origin)}|${id}`
       if (id && seen.has(key)) continue
       if (id) seen.add(key)
+      if (keyed) keyedPeerRows.add(row)
       merged.push(row)
     }
   }))
@@ -414,8 +423,19 @@ export function createServer() {
             // Union merge: peer rows must be dialable from here (a libp2p circuit
             // multiaddr, or a non-loopback endpoint), must not be this substrate's own
             // rows echoed back through the hub (libp2p_peer_id matching a locally
-            // registered vessel), and local rows win on vesselId collision.
+            // registered vessel), and local rows stay first. A peer row sharing a local
+            // vesselId is dropped unless it is a peer node's own instance of that role, on
+            // this host, for a shape the vessel declares node-distinct (peer-instance.ts
+            // admitsPeerInstance); then it is listed after the local rows.
             const localIds = new Set((cap.vessels ?? []).map((v) => String(v.vesselId ?? "")))
+            const shape = String((pointer as { shape?: unknown }).shape ?? "")
+            const localRows = cap.vessels ?? []
+            const admitted = new Set<Record<string, unknown>>()
+            await Promise.all(peerVessels.filter((v) => localIds.has(String(v.vesselId ?? ""))).map(async (v) => {
+              const keyed = keyedPeerRows.has(v)
+              if (!admitsPeerInstance(shape, v, localRows, { keyed, sameHost: true })) return // no lookup for a row refused anyway
+              if (admitsPeerInstance(shape, v, localRows, { keyed, sameHost: await endpointIsThisHost(String(v.endpoint ?? "")) })) admitted.add(v)
+            }))
             const localPeerIds = new Set(
               registry.list().map((v) => String((v as unknown as Record<string, unknown>).libp2p_peer_id ?? "")).filter(Boolean),
             )
@@ -425,7 +445,7 @@ export function createServer() {
                 || !/127\.0\.0\.1|localhost/.test(String(v.endpoint ?? ""))
               const ma0 = Array.isArray(ma) ? String((ma as unknown[])[0] ?? "") : ""
               const selfEcho = localPeerIds.has(String(v.libp2p_peer_id ?? "")) || [...localPeerIds].some((pid) => pid && ma0.includes(pid))
-              return dialable && !selfEcho && !localIds.has(String(v.vesselId ?? ""))
+              return dialable && !selfEcho && (!localIds.has(String(v.vesselId ?? "")) || admitted.has(v))
             })
             if (usable.length > 0) {
               cap.vessels = [...(cap.vessels ?? []), ...usable]
