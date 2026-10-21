@@ -237,6 +237,19 @@ export function stampPeerRow(v: Record<string, unknown>, peer: string): Record<s
   }
 }
 
+// A FORWARD MUST NOT ESCALATE (confused deputy). A peer is asked with the credential postToPeer chooses for it, which
+// is this node's mapped peer key or HUB_API_KEY whenever one is set, so the receiving producer judges the FORWARDER's
+// scopes, not the caller's: a read-scoped caller's write was admitted on the peer. Until the caller's own credential
+// (or an on-behalf-of token) travels with the forward, a state-changing shape (the fleet's `_write` suffix) is refused
+// before any peer is chosen or contacted unless the caller's OWN validated scopes carry write or admin. Fail closed:
+// no auth context or no scopes refuses. Read shapes forward exactly as before; a local producer still receives the
+// caller's own header and judges it itself. Exported for tests.
+export const isStateChangingShape = (shape: string): boolean => shape.endsWith("_write")
+export function callerMayWrite(auth: { scopes?: unknown } | undefined): boolean {
+  const scopes = Array.isArray(auth?.scopes) ? (auth!.scopes as unknown[]) : []
+  return scopes.includes("write") || scopes.includes("admin")
+}
+
 // General-shape fleet resolution (law 11 / location-transparency): on a LOCAL
 // miss for a non-discovery shape, forward the whole pointer to peer discovery
 // instances (the federation door, never a raw peer-vessel URL) and return the
@@ -363,6 +376,10 @@ export function createServer() {
           // pointer to peer discovery instances so a shape served on another
           // substrate resolves THROUGH discovery. Depth-limited; no-op unless
           // PEER_DISCOVERY_ENDPOINTS is set, so single-substrate behaviour is unchanged.
+          if (isStateChangingShape(pointer.type) && !callerMayWrite(auth)) {
+            console.warn(`[discovery] refused forward of ${pointer.type}: caller_lacks_write_scope`)
+            return c.json({ error: "caller_lacks_write_scope", shape: pointer.type, detail: "a state-changing shape with no local producer is forwarded only for a caller whose own scopes include write or admin" }, 403)
+          }
           const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
           const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
