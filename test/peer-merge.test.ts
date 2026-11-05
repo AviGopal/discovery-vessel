@@ -283,7 +283,9 @@ describe("peer merge - failed peers are logged", () => {
     const node1 = "http://node1-503.test:18100"
     injectPeers({ [node1]: () => Response.json({ error: "busy" }, { status: 503 }) })
     await capability()
-    expect(lines.filter((l) => l.includes(node1) && l.includes("503")).length).toBe(1)
+    // Scope to the peer-fanout journal (notePeerFanout): the peer-set-source selection line also names
+    // peers (in its recorded set-used), and this fixture's host names embed the status (node1-503.test).
+    expect(lines.filter((l) => l.includes("peer fanout") && l.includes(node1) && l.includes("503")).length).toBe(1)
   })
 
   it("an unreachable peer leaves a fanout line naming the peer", async () => {
@@ -300,10 +302,11 @@ describe("peer merge - failed peers are logged", () => {
     await capability()
     status = 500
     await capability()
-    expect(lines.filter((l) => l.includes(node1)).length).toBe(1)
+    // Scope to the peer-fanout journal (the peer-set-source selection line also names peers in its set-used).
+    expect(lines.filter((l) => l.includes("peer fanout") && l.includes(node1)).length).toBe(1)
     status = 404
     await capability()
-    expect(lines.filter((l) => l.includes(node1)).length).toBe(2)
+    expect(lines.filter((l) => l.includes("peer fanout") && l.includes(node1)).length).toBe(2)
     status = 200
     await capability()
     status = 404

@@ -18,6 +18,7 @@ import { admitsPeerInstance, endpointIsThisHost } from "./peer-instance"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import { systemOrgId, templateProducesShape } from "./learned-description-writers"
 import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
+import { selectPeerSet, recordPeerSetConsumption } from "./peer-set-source"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -68,8 +69,13 @@ async function forwardToPeers(
   depth: number,
   authHeader: string | undefined,
 ): Promise<Array<Record<string, unknown>>> {
-  const peers = currentPeerEndpoints()
-  if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return []
+  if (depth >= MAX_PEER_DEPTH) return []
+  // PEER-SET SOURCE (activity discovery-vessel:peer-set-source): variant-selected from pool reads cached
+  // ≤30 s (single-flight). It journals source + set-used per call; variant 0 returns the env seed.
+  const selection = await selectPeerSet(currentPeerEndpoints())
+  const peers = selection.peers
+  if (peers.length === 0) return []
+  let peersAnswered = 0
   const merged: Array<Record<string, unknown>> = []
   // Dedupe key is (stamped origin, vesselId): two peers may both serve a vessel under the
   // same bare id (a substrate's first node and a foreign hub both run concept-db-local), and
@@ -100,6 +106,7 @@ async function forwardToPeers(
       return
     }
     notePeerFanout(peer, "ok", "")
+    peersAnswered++ // a peer in the selected set answered 2xx — consumption evidence for the credit trace
     // Asked on the keyed path (postToPeer sent the credential chosen for this peer): the precondition for admitting
     // this peer's instance of a local role (peer-instance.ts).
     const auth = peerAuthorization(peer, authHeader)
@@ -117,6 +124,8 @@ async function forwardToPeers(
       merged.push(row)
     }
   }))
+  // GRADE BY CONSUMPTION: the first fan-out using this selection credits its own trace (fail-open, non-blocking).
+  void recordPeerSetConsumption(selection, peersAnswered > 0)
   return merged
 }
 
@@ -260,16 +269,24 @@ async function forwardResolveToPeers(
   depth: number,
   authHeader: string | undefined,
 ): Promise<{ body: unknown; status: number } | undefined> {
-  const peers = currentPeerEndpoints()
-  if (peers.length === 0 || depth >= MAX_PEER_DEPTH) return undefined
+  if (depth >= MAX_PEER_DEPTH) return undefined
+  // PEER-SET SOURCE (activity discovery-vessel:peer-set-source): see forwardToPeers.
+  const selection = await selectPeerSet(currentPeerEndpoints())
+  const peers = selection.peers
+  if (peers.length === 0) return undefined
   for (const peer of peers) {
     try {
       const res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 10000 })
       if (!res || !res.ok) continue // 404 / error / mapped credential unavailable — try the next
       const body = await res.json()
+      // GRADE BY CONSUMPTION: a peer in the selected set ANSWERED — 2xx with a parseable body, the same
+      // "answered" definition forwardToPeers uses (a 4xx/5xx/throw is not-answered in both). Fail-open, non-blocking.
+      void recordPeerSetConsumption(selection, true)
       return { body, status: res.status }
     } catch { /* peer unreachable / timed out — try the next peer */ }
   }
+  // No peer in the selected set answered (no 2xx-with-body) — credit the selection as not reached.
+  void recordPeerSetConsumption(selection, false)
   return undefined
 }
 
