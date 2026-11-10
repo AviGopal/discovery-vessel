@@ -617,6 +617,8 @@ export function createServer() {
           detail: refuseReason,
         }, 409)
       }
+      // Per-shape input schemas, declared by the vessel next to its handlers; only advertised shapes, bounded, no addresses.
+      const shapeInputs = sanitizeShapeInputs(request.shape_inputs, request.shapes)
       const registration = registry.register({
         vesselId: request.vesselId,
         vesselName: request.vesselName ?? request.vesselId,
@@ -636,8 +638,7 @@ export function createServer() {
         // one-liners that let a decomposition planner match ANY advertised
         // resolver from its description alone. Backward-compatible (absent = id-only).
         shape_descriptions: request.shape_descriptions,
-        // Per-shape input schemas, declared by the vessel next to its handlers; only advertised shapes, bounded, no addresses.
-        ...(sanitizeShapeInputs(request.shape_inputs, request.shapes) ? { shape_inputs: sanitizeShapeInputs(request.shape_inputs, request.shapes) } : {}),
+        ...(shapeInputs ? { shape_inputs: shapeInputs } : {}),
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | "libp2p" | undefined,
         // libp2p transport advertisement (federation reachability).
         libp2p_peer_id: request.libp2p_peer_id,
@@ -789,7 +790,8 @@ export function createServer() {
     const orgIdsParam = c.req.query("org_ids")
     const orgIds = orgIdsParam ? orgIdsParam.split(",").map(s => s.trim()).filter(Boolean) : undefined
     return c.json({
-      shape_descriptions: registry.getShapeDescriptions(orgIds ? { orgIds } : undefined)
+      shape_descriptions: registry.getShapeDescriptions(orgIds ? { orgIds } : undefined),
+      shape_inputs: registry.getShapeInputs(orgIds ? { orgIds } : undefined),
     })
   })
 

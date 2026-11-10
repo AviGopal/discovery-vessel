@@ -71,4 +71,16 @@ describe("declared inputs through registration and the shapeDescriptions read", 
     expect(Object.keys(declared.shape_descriptions)).toEqual(["fs_read"])
     expect(Object.keys((await read({})).shape_descriptions).sort()).toEqual(["fs_read", "record_write"])
   })
+  it("[MUST-FAIL] a shape with declared inputs and no description is still offered", async () => {
+    // A shape no other test describes: the registry keeps earlier tests' vessels.
+    await register({ vesselId: "v-bare", endpoint: "http://v-bare.test", systemVessel: true, shapes: ["bare_shape"], shape_inputs: { bare_shape: FS_READ } })
+    const declared = await read({ declared: true, shapes: ["bare_shape"] })
+    expect(declared.shape_descriptions).toEqual({ bare_shape: "" })
+    expect(declared.shape_inputs).toEqual({ bare_shape: FS_READ })
+  })
+  it("the HTTP vocabulary route shows declared inputs too", async () => {
+    await register({ vesselId: "v-bare", endpoint: "http://v-bare.test", systemVessel: true, shapes: ["bare_shape"], shape_inputs: { bare_shape: FS_READ } })
+    const body = (await (await app.request("/registry/shape-descriptions")).json()) as { shape_inputs?: Record<string, unknown> }
+    expect(body.shape_inputs?.bare_shape).toEqual(FS_READ)
+  })
 })

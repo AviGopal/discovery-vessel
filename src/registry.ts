@@ -490,8 +490,8 @@ export class VesselRegistry {
       }
     }
     // Fill remaining gaps with LEARNED descriptions. Advertised always wins (we skip any shape already in `merged`).
-    // A learned entry is served while it is CLAIMED: a live, accessible vessel lists the shape, or the entry names the
-    // template that produces it (a minted shape no vessel advertises); a retired entry is kept but not served.
+    // A learned entry is served while a live, accessible vessel lists the shape; a retired entry is kept but not served
+    // (learned-descriptions.ts).
     for (const [shape, entry] of this.learnedDescriptions.served(liveShapes)) {
       if (merged[shape]) continue // advertised wins
       merged[shape] = entry.description

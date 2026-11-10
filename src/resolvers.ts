@@ -330,8 +330,11 @@ export async function resolveShapeDescriptions(
   const wanted = Array.isArray(pointer.shapes) ? new Set(pointer.shapes.map(String)) : null
   const shape_descriptions: Record<string, string> = {}
   const shape_inputs: Record<string, Record<string, unknown>> = {}
-  for (const [shape, text] of Object.entries(all).sort(([a], [b]) => a.localeCompare(b))) {
+  // Every shape that is described OR has declared inputs: a declaration makes a shape fillable whether or not anyone
+  // wrote prose for it, so it is offered with an empty description rather than dropped.
+  for (const shape of [...new Set([...Object.keys(all), ...Object.keys(inputs)])].sort((a, b) => a.localeCompare(b))) {
     if (wanted && !wanted.has(shape)) continue
+    const text = all[shape] ?? ""
     if (ADDRESS.test(text)) continue
     if (pointer.declared === true && !inputs[shape]) continue
     shape_descriptions[shape] = text
