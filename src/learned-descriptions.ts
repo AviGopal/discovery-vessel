@@ -8,8 +8,10 @@
  * description, the only way a goal can recall it by meaning, was filtered out by construction.
  *
  * Now:
- *   - an entry may name its producer (produced_by: the template id). Such an entry is CLAIMED by that producer and is
- *     served even when no vessel lists the shape; a plain learned entry still needs a live vessel to list its shape;
+ *   - an entry is served only while a live vessel lists its shape. An entry used to be served on a produced_by claim
+ *     (a template id checked against activity-api); those templates left with activity-api, and the walk's own
+ *     templates are records rows it reads from its pool, never discovery entries, so a claim no longer serves an entry
+ *     and a new one is refused. A stored produced_by is kept as data;
  *   - RETIRE is explicit: the producer's retirement (or anyone holding the key) posts {shape, retire: true}; a retired
  *     entry is kept, not served, and is restored by the next description written for the shape;
  *   - the store PERSISTS to the state volume and is reloaded at start, so a restart is not a loss.
@@ -69,7 +71,7 @@ export class LearnedDescriptions {
   }
   /** The entries to SERVE: not retired, and claimed (a producer named, or a live vessel lists the shape). */
   served(liveShapes: ReadonlySet<string>): Array<[string, LearnedEntry]> {
-    return [...this.map.entries()].filter(([shape, e]) => !e.retired_at && (Boolean(e.produced_by) || liveShapes.has(shape)))
+    return [...this.map.entries()].filter(([shape, e]) => !e.retired_at && liveShapes.has(shape))
   }
   get size(): number { return this.map.size }
   get(shape: string): LearnedEntry | undefined { return this.map.get(shape) }

@@ -500,6 +500,24 @@ export class VesselRegistry {
   }
 
   /**
+   * Each shape's declared input schema, from the live vessels the orgs can reach (scoped like getShapeDescriptions);
+   * the first live advertiser that declares one wins. Only shapes the vessel lists in `shapes`.
+   */
+  getShapeInputs(options?: { orgIds?: string[] }): Record<string, Record<string, unknown>> {
+    const orgIds = options?.orgIds
+    const out: Record<string, Record<string, unknown>> = {}
+    for (const vessel of this.vessels.values()) {
+      if (this.isExpired(vessel)) continue
+      if (orgIds?.length && !(vessel.systemVessel === true || (vessel.orgId != null && orgIds.includes(vessel.orgId)))) continue
+      const advertised = new Set(vessel.shapes)
+      for (const [shape, schema] of Object.entries(vessel.shape_inputs ?? {})) {
+        if (advertised.has(shape) && !out[shape]) out[shape] = schema
+      }
+    }
+    return out
+  }
+
+  /**
    * Set (upsert) a LEARNED description for a shape (auto-describe tick).
    * The learned value only surfaces in getShapeDescriptions when no live vessel
    * ADVERTISES a description for that shape (advertised-wins). Returns the stored

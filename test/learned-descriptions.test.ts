@@ -1,6 +1,6 @@
-// LEARNED SHAPE DESCRIPTIONS (I-T structural, RUN 3): persisted across a restart, served for a template-produced shape no
-// vessel advertises, soft-retired and restored. Measured before: an in-memory map a restart lost, and a read that dropped
-// any learned description whose shape no live vessel lists, so a MINTED shape could never be described.
+// LEARNED SHAPE DESCRIPTIONS: persisted across a restart, soft-retired and restored, and served only while a live vessel
+// lists the shape. A produced_by claim (an activity-api template) used to serve an entry no vessel lists; those templates
+// left with activity-api, so a claim is kept as data and serves nothing.
 import { describe, expect, it } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -11,12 +11,13 @@ const Store = (ld as unknown as { LearnedDescriptions?: new (p: string | null) =
 const fresh = () => { const d = mkdtempSync(join(tmpdir(), "learned-desc-")); return { dir: d, path: join(d, "state", "learned.json") } }
 
 describe("learned shape descriptions", () => {
-  it("[MUST-FAIL] a description for a shape a TEMPLATE produces is served with no vessel listing it", () => {
+  it("[MUST-FAIL] a produced_by claim does not serve an entry no live vessel lists", () => {
     const { dir, path } = fresh()
     try {
       const s = new Store!(path)
       s.set("s_minted7", "Totals parcels per region, minted from a reached trace.", "mint", "learned-parcel-totals")
-      expect(s.served(new Set<string>()).map(([k]: [string]) => k)).toEqual(["s_minted7"])
+      expect(s.served(new Set<string>())).toEqual([])
+      expect(s.served(new Set(["s_minted7"])).map(([k]: [string]) => k)).toEqual(["s_minted7"])
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
   it("[MUST-FAIL] the store survives a restart (persisted to the state volume, reloaded)", () => {
@@ -33,12 +34,13 @@ describe("learned shape descriptions", () => {
     const { dir, path } = fresh()
     try {
       const s = new Store!(path)
+      const live = new Set(["s_old"])
       s.set("s_old", "Old.", "mint", "tpl-2")
       s.retire("s_old")
-      expect(s.served(new Set<string>())).toEqual([])
+      expect(s.served(live)).toEqual([])
       expect(s.get("s_old")).toBeDefined()
       s.set("s_old", "Back again.", "mint")
-      expect(s.served(new Set<string>()).map(([k]: [string]) => k)).toEqual(["s_old"])
+      expect(s.served(live).map(([k]: [string]) => k)).toEqual(["s_old"])
       expect(s.get("s_old")?.produced_by).toBe("tpl-2") // the producer is kept across a re-description
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
@@ -56,13 +58,14 @@ describe("learned shape descriptions", () => {
       expect(new Store!(path).size).toBe(0)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
-  it("[WIRING] the registry serves claimed learned entries (advertised still wins); the POST takes produced_by and retire", () => {
+  it("[WIRING] the registry serves learned entries for live shapes (advertised still wins); the POST refuses produced_by and takes retire", () => {
     const reg = readFileSync(join(import.meta.dir, "..", "src", "registry.ts"), "utf8")
     expect(reg).toContain("for (const [shape, entry] of this.learnedDescriptions.served(liveShapes)) {")
     expect(reg).toContain("if (merged[shape]) continue // advertised wins")
     expect(reg).toContain("private learnedDescriptions = new LearnedDescriptions()")
     const idx = readFileSync(join(import.meta.dir, "..", "src", "index.ts"), "utf8")
-    expect(idx).toContain("registry.setLearnedDescription(shape, description, source, producedBy)")
+    expect(idx).toContain("registry.setLearnedDescription(shape, description, source)")
+    expect(idx).toContain("produced_by is no longer accepted")
     expect(idx).toContain("registry.retireLearnedDescription(shape)")
   })
 })

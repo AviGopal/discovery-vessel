@@ -11,12 +11,12 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
-import { resolve, getResolvableShapes } from "./resolvers"
+import { resolve, getResolvableShapes, sanitizeShapeInputs } from "./resolvers"
 import { metricsRegistry } from "./metrics"
 import { postToPeer, normalizePeerKey, peerAuthorization } from "./peer-credentials"
 import { admitsPeerInstance, endpointIsThisHost } from "./peer-instance"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
-import { systemOrgId, templateProducesShape } from "./learned-description-writers"
+import { systemOrgId } from "./learned-description-writers"
 import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
 import { selectPeerSet, recordPeerSetConsumption } from "./peer-set-source"
 import type {
@@ -636,6 +636,8 @@ export function createServer() {
         // one-liners that let a decomposition planner match ANY advertised
         // resolver from its description alone. Backward-compatible (absent = id-only).
         shape_descriptions: request.shape_descriptions,
+        // Per-shape input schemas, declared by the vessel next to its handlers; only advertised shapes, bounded, no addresses.
+        ...(sanitizeShapeInputs(request.shape_inputs, request.shapes) ? { shape_inputs: sanitizeShapeInputs(request.shape_inputs, request.shapes) } : {}),
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | "libp2p" | undefined,
         // libp2p transport advertisement (federation reachability).
         libp2p_peer_id: request.libp2p_peer_id,
@@ -797,8 +799,8 @@ export function createServer() {
   // describe its OWN resolvers without a vessel owner re-registering. A vessel-
   // ADVERTISED description always wins over a learned one (see getShapeDescriptions).
   // Auth: requires ApiKey (not in PUBLIC_PATHS, and POST), matching other writes.
-  // WRITERS (learned-description-writers.ts): set and retire require the SYSTEM identity (fail closed); a produced_by must
-  // name an existing template that declares the shape.
+  // WRITERS (learned-description-writers.ts): set and retire require the SYSTEM identity (fail closed). produced_by is
+  // refused: it named an activity-api template, and those left with activity-api (learned-descriptions.ts).
   app.post("/registry/shape-descriptions", async (c) => {
     try {
       const auth = getAuthContextOptional(c)
@@ -817,13 +819,10 @@ export function createServer() {
         return c.json({ error: "Missing required fields: shape, description" }, 400)
       }
       const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "auto"
-      // produced_by: the template that produces this shape (a minted shape no vessel advertises); it keeps the entry claimed.
-      const producedBy = typeof body.produced_by === "string" && body.produced_by.trim() ? body.produced_by.trim() : undefined
-      if (producedBy) {
-        const chk = await templateProducesShape(producedBy, shape)
-        if (!chk.ok) return c.json({ error: chk.reason }, chk.status)
+      if (typeof body.produced_by === "string" && body.produced_by.trim()) {
+        return c.json({ error: "produced_by is no longer accepted: a learned description is served while a live vessel lists its shape" }, 400)
       }
-      const entry = registry.setLearnedDescription(shape, description, source, producedBy)
+      const entry = registry.setLearnedDescription(shape, description, source)
       if (!entry) {
         return c.json({ error: "Invalid shape or description" }, 400)
       }

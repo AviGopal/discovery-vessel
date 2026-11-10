@@ -5,8 +5,7 @@
  *   - set and retire require the caller's identity-validated org to be the SYSTEM ORG: this vessel's own key's org as the
  *     identity vessel validates it (bootstrap identity, resolved at use, cached; never 'default' or empty). FAIL CLOSED:
  *     no validated system org, no writer;
- *   - a produced_by must name an EXISTING template whose declared output shapes include the shape, checked at write time
- *     (activity-api GET /v2/activities/templates/:id), so a minted shape is "claimed" only by a real producer.
+ *   - produced_by is refused (index.ts): it named an activity-api template, and those left with activity-api.
  */
 import { validateApiKeyNow } from "./middleware/auth"
 
@@ -24,25 +23,3 @@ export async function systemOrgId(validate: (k: string) => Promise<{ orgId: stri
 }
 export function __resetSystemOrgForTests(): void { cachedSystemOrg = null }
 
-export type ProducerCheck = { ok: true } | { ok: false; status: 400 | 503; reason: string }
-
-/** Does `templateId` name an existing template whose declared outputs include `shape`? */
-export async function templateProducesShape(templateId: string, shape: string, fetchImpl: typeof fetch = fetch, endpoint: string = process.env.ACTIVITY_API_ENDPOINT ?? "", ownKey: string = process.env.METABOB_API_KEY ?? ""): Promise<ProducerCheck> {
-  if (!endpoint) return { ok: false, status: 503, reason: "no activity-api endpoint to verify produced_by" }
-  let r: Response
-  try {
-    r = await fetchImpl(`${endpoint.replace(/\/$/, "")}/v2/activities/templates/${encodeURIComponent(templateId)}`, {
-      headers: ownKey ? { Authorization: `ApiKey ${ownKey}` } : {},
-      signal: AbortSignal.timeout(5_000),
-    })
-  } catch (e) {
-    return { ok: false, status: 503, reason: `produced_by could not be verified: ${(e as Error).message}` }
-  }
-  if (r.status === 404) return { ok: false, status: 400, reason: `produced_by ${templateId} names no template` }
-  if (!r.ok) return { ok: false, status: 503, reason: `produced_by could not be verified (activity-api HTTP ${r.status})` }
-  const t = (await r.json().catch(() => null)) as { output_shapes?: unknown; outputShapes?: unknown } | null
-  const outs = Array.isArray(t?.output_shapes) ? t!.output_shapes : Array.isArray(t?.outputShapes) ? t!.outputShapes : []
-  return (outs as unknown[]).map(String).includes(shape)
-    ? { ok: true }
-    : { ok: false, status: 400, reason: `produced_by ${templateId} does not declare ${shape} among its output shapes` }
-}

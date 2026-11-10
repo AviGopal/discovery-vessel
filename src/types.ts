@@ -151,6 +151,14 @@ export interface VesselRegistration {
    */
   shape_descriptions?: Record<string, string>
 
+  /**
+   * OPTIONAL per-shape input schema (JSON Schema): the pointer fields a caller sends to resolve the shape, declared by
+   * the vessel that owns it, next to its handler. A producer that has to FILL a pointer (the walk's request) reads these
+   * through shapeDescriptions at use time; without them it can name a shape but not its arguments. Kept only for shapes
+   * in `shapes` (sanitizeShapeInputs).
+   */
+  shape_inputs?: Record<string, Record<string, unknown>>
+
   /** Protocol for communication (defaults to http). "libp2p" = reachable over the
    *  libp2p overlay (peerId/multiaddr below) rather than a plain http endpoint. */
   protocol?: "http" | "grpc" | "ws" | "unix" | "libp2p"
@@ -326,6 +334,8 @@ export interface ShapeDescriptionsPointer {
   type: "shapeDescriptions"
   /** Only these shapes (default: every described shape). */
   shapes?: string[]
+  /** Only shapes whose producer declared their inputs: the ones a caller can fill, not just name. */
+  declared?: boolean
 }
 
 /**
@@ -457,6 +467,8 @@ export interface VesselRegistryResult {
 
 export interface ShapeDescriptionsResult {
   shape_descriptions: Record<string, string>
+  /** Each described shape's declared input schema, where its producer declared one. */
+  shape_inputs: Record<string, Record<string, unknown>>
 }
 
 export type ResolverResult =
@@ -500,6 +512,8 @@ export interface RegisterRequest {
   /** OPTIONAL per-shape one-line descriptions (shape id → "produces + when to
    *  use it"). Powers description-based planner matching. Backward-compatible. */
   shape_descriptions?: Record<string, string>
+  /** OPTIONAL per-shape input schema (see VesselRegistration.shape_inputs). */
+  shape_inputs?: Record<string, unknown>
   protocol?: string
   /** libp2p transport advertisement (federation reachability). */
   libp2p_peer_id?: string

@@ -290,24 +290,54 @@ export async function resolveVesselRegistry(
 // go by shape through /resolve).
 const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\[[0-9a-f]*:[0-9a-f:]*\](?::\d{2,5})?|\b[a-z][a-z0-9.-]*:\d{2,5}\b/i
 
+/** One declared input schema, serialized, at most this long; a vessel's whole declaration at most SHAPE_INPUTS_MAX. */
+export const SHAPE_INPUT_MAX = 8_192
+export const SHAPE_INPUTS_MAX = 65_536
+
+/**
+ * A registration's shape_inputs as discovery keeps them: only for shapes the vessel advertises, each a JSON object that
+ * serializes within SHAPE_INPUT_MAX and holds no address (a schema says what to send, never where), the whole within
+ * SHAPE_INPUTS_MAX. Anything else is dropped; undefined when nothing is left.
+ */
+export function sanitizeShapeInputs(raw: unknown, shapes: unknown): Record<string, Record<string, unknown>> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Array.isArray(shapes)) return undefined
+  const advertised = new Set(shapes.map(String))
+  const out: Record<string, Record<string, unknown>> = {}
+  let total = 0
+  for (const [shape, schema] of Object.entries(raw as Record<string, unknown>)) {
+    if (!advertised.has(shape) || !schema || typeof schema !== "object" || Array.isArray(schema)) continue
+    const text = JSON.stringify(schema)
+    if (text.length > SHAPE_INPUT_MAX || ADDRESS.test(text) || total + text.length > SHAPE_INPUTS_MAX) continue
+    out[shape] = schema as Record<string, unknown>
+    total += text.length
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 /**
  * Resolve a shapeDescriptions impulse
  * The descriptions discovery already keeps (registry.getShapeDescriptions), scoped like GET
- * /registry/shape-descriptions to the vessels the caller's org can reach.
+ * /registry/shape-descriptions to the vessels the caller's org can reach, with each shape's declared input schema
+ * (registry.getShapeInputs). `declared` keeps only the shapes that have one: those a caller can fill, not just name.
  */
 export async function resolveShapeDescriptions(
   pointer: ShapeDescriptionsPointer,
   options?: { orgIds?: string[] }
 ): Promise<ShapeDescriptionsResult> {
-  const all = registry.getShapeDescriptions(options?.orgIds?.length ? { orgIds: options.orgIds } : undefined)
+  const scope = options?.orgIds?.length ? { orgIds: options.orgIds } : undefined
+  const all = registry.getShapeDescriptions(scope)
+  const inputs = registry.getShapeInputs(scope)
   const wanted = Array.isArray(pointer.shapes) ? new Set(pointer.shapes.map(String)) : null
   const shape_descriptions: Record<string, string> = {}
+  const shape_inputs: Record<string, Record<string, unknown>> = {}
   for (const [shape, text] of Object.entries(all).sort(([a], [b]) => a.localeCompare(b))) {
     if (wanted && !wanted.has(shape)) continue
     if (ADDRESS.test(text)) continue
+    if (pointer.declared === true && !inputs[shape]) continue
     shape_descriptions[shape] = text
+    if (inputs[shape]) shape_inputs[shape] = inputs[shape]
   }
-  return { shape_descriptions }
+  return { shape_descriptions, shape_inputs }
 }
 
 /**
