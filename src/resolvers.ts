@@ -288,7 +288,7 @@ export async function resolveVesselRegistry(
 // unit name such as records-vessel:8510 as much as a dotted name (a clock time such as 10:30:00 is not one). A
 // description carrying one is left out of the vocabulary, so a producer that reads it never learns a placement (calls
 // go by shape through /resolve).
-const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\[[0-9a-f:]+\](?::\d{2,5})?|\b[a-z][a-z0-9.-]*:\d{2,5}\b/i
+const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\[[0-9a-f]*:[0-9a-f:]*\](?::\d{2,5})?|\b[a-z][a-z0-9.-]*:\d{2,5}\b/i
 
 /**
  * Resolve a shapeDescriptions impulse

@@ -367,7 +367,7 @@ describe("Discovery Vessel Endpoints", () => {
         body: JSON.stringify({
           vesselId: "described-1",
           endpoint: "http://described-1.test:8123",
-          shapes: ["fs_read", "git_commit", "leaky", "hosty", "unit", "v6", "timed"],
+          shapes: ["fs_read", "git_commit", "leaky", "hosty", "unit", "v6", "timed", "indexed"],
           shape_descriptions: {
             fs_read: "produces file content",
             git_commit: "produces a commit",
@@ -375,6 +375,7 @@ describe("Discovery Vessel Endpoints", () => {
             hosty: "answers on node.example.test:8443",
             unit: "served by records-vessel:8510",
             v6: "listens on [::1]:8080",
+            indexed: "reads fields[1] and array index [0]",
             timed: "the run that started at 2026-11-10T10:30:00Z",
           },
         }),
@@ -389,6 +390,7 @@ describe("Discovery Vessel Endpoints", () => {
       expect(got.fs_read).toBe("produces file content")
       expect(got.git_commit).toBe("produces a commit")
       expect(got.timed).toBe("the run that started at 2026-11-10T10:30:00Z")
+      expect(got.indexed).toBe("reads fields[1] and array index [0]")
       expect("leaky" in got).toBe(false)
       expect("hosty" in got).toBe(false)
       expect("unit" in got).toBe(false)
