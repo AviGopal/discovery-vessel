@@ -367,11 +367,13 @@ describe("Discovery Vessel Endpoints", () => {
         body: JSON.stringify({
           vesselId: "described-1",
           endpoint: "http://described-1.test:8123",
-          shapes: ["fs_read", "git_commit", "leaky"],
+          shapes: ["fs_read", "git_commit", "leaky", "hosty", "timed"],
           shape_descriptions: {
             fs_read: "produces file content",
             git_commit: "produces a commit",
             leaky: "served at http://10.0.0.5:9000/resolve",
+            hosty: "answers on node.example.test:8443",
+            timed: "the run that started at 2026-11-10T10:30:00Z",
           },
         }),
       })
@@ -381,10 +383,24 @@ describe("Discovery Vessel Endpoints", () => {
       }
       const all = await ask({ type: "shapeDescriptions" })
       expect(all.status).toBe(200)
-      expect(all.body.content.shape_descriptions).toEqual({ fs_read: "produces file content", git_commit: "produces a commit" })
+      const got = all.body.content.shape_descriptions
+      expect(got.fs_read).toBe("produces file content")
+      expect(got.git_commit).toBe("produces a commit")
+      expect(got.timed).toBe("the run that started at 2026-11-10T10:30:00Z")
+      expect("leaky" in got).toBe(false)
+      expect("hosty" in got).toBe(false)
       expect(JSON.stringify(all.body)).not.toContain("described-1.test")
       const some = await ask({ type: "shapeDescriptions", shapes: ["git_commit"] })
       expect(some.body.content.shape_descriptions).toEqual({ git_commit: "produces a commit" })
+    })
+
+    test("shapeDescriptions answers only for vessels the caller's org can reach", async () => {
+      registry.register({ vesselId: "org-b-vessel", endpoint: "http://b.test", shapes: ["b_only"], orgId: "org-b", shape_descriptions: { b_only: "org B's shape" } } as Parameters<typeof registry.register>[0])
+      registry.register({ vesselId: "org-a-vessel", endpoint: "http://a.test", shapes: ["a_only"], orgId: TEST_ORG_ID, shape_descriptions: { a_only: "the caller's shape" } } as Parameters<typeof registry.register>[0])
+      const res = await app.request("/resolve", { method: "POST", headers: AUTH_HEADERS, body: JSON.stringify({ pointer: { type: "shapeDescriptions" } }) })
+      const got = ((await res.json()) as { content: { shape_descriptions: Record<string, string> } }).content.shape_descriptions
+      expect(got.a_only).toBe("the caller's shape")
+      expect("b_only" in got).toBe(false)
     })
 
     test("resolves vesselRegistry pointer", async () => {
