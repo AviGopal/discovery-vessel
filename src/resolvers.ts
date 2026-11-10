@@ -19,7 +19,9 @@ import type {
   VesselRegistryResult,
   VesselOrigin,
   ResolverTier,
-  ResolverResult
+  ResolverResult,
+  ShapeDescriptionsPointer,
+  ShapeDescriptionsResult
 } from "./types"
 
 /**
@@ -282,11 +284,35 @@ export async function resolveVesselRegistry(
   }
 }
 
+// An address is a URL, an IPv4 address or a host:port. A description carrying one is left out of the vocabulary, so
+// a producer that reads it never learns a placement (calls go by shape through /resolve).
+const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[a-z0-9.-]+:\d{2,5}\b/i
+
+/**
+ * Resolve a shapeDescriptions impulse
+ * The descriptions discovery already keeps (registry.getShapeDescriptions), scoped like GET
+ * /registry/shape-descriptions to the vessels the caller's org can reach.
+ */
+export async function resolveShapeDescriptions(
+  pointer: ShapeDescriptionsPointer,
+  options?: { orgIds?: string[] }
+): Promise<ShapeDescriptionsResult> {
+  const all = registry.getShapeDescriptions(options?.orgIds?.length ? { orgIds: options.orgIds } : undefined)
+  const wanted = Array.isArray(pointer.shapes) ? new Set(pointer.shapes.map(String)) : null
+  const shape_descriptions: Record<string, string> = {}
+  for (const [shape, text] of Object.entries(all).sort(([a], [b]) => a.localeCompare(b))) {
+    if (wanted && !wanted.has(shape)) continue
+    if (ADDRESS.test(text)) continue
+    shape_descriptions[shape] = text
+  }
+  return { shape_descriptions }
+}
+
 /**
  * Main resolver dispatch
  * Routes pointer to appropriate resolver based on type
  */
-export async function resolve(pointer: DiscoveryPointer): Promise<ResolverResult> {
+export async function resolve(pointer: DiscoveryPointer, options?: { orgIds?: string[] }): Promise<ResolverResult> {
   const startTime = Date.now()
   let success = true
 
@@ -310,6 +336,10 @@ export async function resolve(pointer: DiscoveryPointer): Promise<ResolverResult
         result = await resolveVesselRegistry(pointer)
         break
 
+      case "shapeDescriptions":
+        result = await resolveShapeDescriptions(pointer, options)
+        break
+
       default:
         success = false
         throw new Error(`Unknown discovery pointer type: ${(pointer as { type: string }).type}`)
@@ -329,5 +359,5 @@ export async function resolve(pointer: DiscoveryPointer): Promise<ResolverResult
  * Get shapes this vessel can resolve
  */
 export function getResolvableShapes(): string[] {
-  return ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry"]
+  return ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry", "shapeDescriptions"]
 }

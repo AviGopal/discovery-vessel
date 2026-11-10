@@ -360,6 +360,33 @@ describe("Discovery Vessel Endpoints", () => {
       expect(data.content.endpoint).toBeDefined()
     })
 
+    test("resolves shapeDescriptions: the vocabulary by shape, with no addresses", async () => {
+      await app.request("/register", {
+        method: "POST",
+        headers: AUTH_HEADERS,
+        body: JSON.stringify({
+          vesselId: "described-1",
+          endpoint: "http://described-1.test:8123",
+          shapes: ["fs_read", "git_commit", "leaky"],
+          shape_descriptions: {
+            fs_read: "produces file content",
+            git_commit: "produces a commit",
+            leaky: "served at http://10.0.0.5:9000/resolve",
+          },
+        }),
+      })
+      const ask = async (pointer: Record<string, unknown>) => {
+        const res = await app.request("/resolve", { method: "POST", headers: AUTH_HEADERS, body: JSON.stringify({ pointer }) })
+        return { status: res.status, body: (await res.json()) as { content: { shape_descriptions: Record<string, string> } } }
+      }
+      const all = await ask({ type: "shapeDescriptions" })
+      expect(all.status).toBe(200)
+      expect(all.body.content.shape_descriptions).toEqual({ fs_read: "produces file content", git_commit: "produces a commit" })
+      expect(JSON.stringify(all.body)).not.toContain("described-1.test")
+      const some = await ask({ type: "shapeDescriptions", shapes: ["git_commit"] })
+      expect(some.body.content.shape_descriptions).toEqual({ git_commit: "produces a commit" })
+    })
+
     test("resolves vesselRegistry pointer", async () => {
       const res = await app.request("/resolve", {
         method: "POST",
@@ -472,7 +499,8 @@ describe("Discovery Vessel Endpoints", () => {
         "vesselCapability",
         "vesselEndpoint",
         "vesselHealth",
-        "vesselRegistry"
+        "vesselRegistry",
+        "shapeDescriptions"
       ])
       expect(data.vessel).toBe("discovery")
       expect(data.version).toBeDefined()

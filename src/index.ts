@@ -384,7 +384,7 @@ export function createServer() {
         return c.json({ error: "Missing pointer or pointer.type" }, 400)
       }
 
-      const DISCOVERY_SHAPES = ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry"]
+      const DISCOVERY_SHAPES = getResolvableShapes()
       if (!DISCOVERY_SHAPES.includes(pointer.type)) {
         const auth = getAuthContextOptional(c)
         const candidates = registry.findByShape(pointer.type, auth?.orgId ? { orgId: auth.orgId } : undefined).filter((v) => v.status === "healthy")
@@ -443,7 +443,8 @@ export function createServer() {
         }
       }
 
-      const content = await resolve(pointer as DiscoveryPointer)
+      const caller = getAuthContextOptional(c)
+      const content = await resolve(pointer as DiscoveryPointer, caller?.orgId ? { orgIds: [caller.orgId] } : undefined)
 
       // Fleet-resolution: a capability query with no LOCAL producer is forwarded to
       // peer discovery instances (depth-limited). No-op unless PEER_DISCOVERY_ENDPOINTS

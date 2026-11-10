@@ -318,6 +318,17 @@ export interface VesselRegistryPointer {
 }
 
 /**
+ * shapeDescriptions - what each live shape produces, in the words its vessels
+ * advertise (or a learned description where none does). A read for a producer
+ * that has to name a shape: the vocabulary, with no addresses in it.
+ */
+export interface ShapeDescriptionsPointer {
+  type: "shapeDescriptions"
+  /** Only these shapes (default: every described shape). */
+  shapes?: string[]
+}
+
+/**
  * Union of all discovery pointer types
  */
 export type DiscoveryPointer =
@@ -325,6 +336,7 @@ export type DiscoveryPointer =
   | VesselEndpointPointer
   | VesselHealthPointer
   | VesselRegistryPointer
+  | ShapeDescriptionsPointer
 
 // =============================================================================
 // RESOLUTION RESULTS
@@ -443,11 +455,16 @@ export interface VesselRegistryResult {
   totalCount: number
 }
 
+export interface ShapeDescriptionsResult {
+  shape_descriptions: Record<string, string>
+}
+
 export type ResolverResult =
   | VesselCapabilityResult
   | VesselEndpointResult
   | VesselHealthResult
   | VesselRegistryResult
+  | ShapeDescriptionsResult
 
 // =============================================================================
 // API TYPES
