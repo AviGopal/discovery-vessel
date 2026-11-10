@@ -284,10 +284,11 @@ export async function resolveVesselRegistry(
   }
 }
 
-// An address is a URL, an IPv4 address, or a host:port where the host is localhost or a dotted name (so a clock time
-// such as 10:30:00 is not one). A description carrying one is left out of the vocabulary, so a producer that reads it
-// never learns a placement (calls go by shape through /resolve).
-const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:localhost|[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+):\d{2,5}\b/i
+// An address is a URL, an IPv4 address, a bracketed IPv6 address, or a host:port whose host starts with a letter: a
+// unit name such as records-vessel:8510 as much as a dotted name (a clock time such as 10:30:00 is not one). A
+// description carrying one is left out of the vocabulary, so a producer that reads it never learns a placement (calls
+// go by shape through /resolve).
+const ADDRESS = /[a-z][a-z0-9+.-]*:\/\/|\b\d{1,3}(?:\.\d{1,3}){3}\b|\[[0-9a-f:]+\](?::\d{2,5})?|\b[a-z][a-z0-9.-]*:\d{2,5}\b/i
 
 /**
  * Resolve a shapeDescriptions impulse
