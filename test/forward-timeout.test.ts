@@ -2,6 +2,8 @@
 // default fetch timeout cut every forward at about 300 s, so records' long waits (advertised as unbounded) failed as
 // forward_failed "The operation timed out" between 300 and 360 s.
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { createServer, registry } from "../src/index"
 import { setIdentityValidator } from "../src/middleware/auth"
 import type { Hono } from "hono"
@@ -39,5 +41,11 @@ describe("forward timeout", () => {
     expect(forwarded).toBeDefined()
     expect((forwarded as { timeout?: unknown }).timeout).toBe(false)
     expect(forwarded?.signal).toBeDefined()
+  })
+  it("[MUST-FAIL] the server holds a connection open for as long as a forward runs (no 10 s idle default)", () => {
+    // index.ts starts the server and registers on import, so its serve options are read as text.
+    const entry = readFileSync(join(import.meta.dir, "..", "index.ts"), "utf8")
+    const options = entry.slice(entry.indexOf("export default {"))
+    expect(options).toContain("idleTimeout: 0,")
   })
 })
