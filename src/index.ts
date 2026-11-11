@@ -426,6 +426,10 @@ export function createServer() {
         const resolveEndpoint = target.resolve_endpoint ?? "/v2/impulses/resolve"
         const timeoutMs = target.resolve_timeout_ms ?? 10000
         const forwardUrl = /^https?:\/\//.test(resolveEndpoint) ? resolveEndpoint : `${endpoint}${resolveEndpoint}`
+        // This caller's connection is held for as long as the forward runs, so the server's idle cut (Bun's 10 s
+        // default) is lifted for THIS request only; every other connection keeps it. c.env is the Bun server under
+        // the default-export serve style; absent (a test calling app.request), nothing to lift.
+        try { (c.env as unknown as { timeout?: (r: Request, s: number) => void } | undefined)?.timeout?.(c.req.raw, 0) } catch { /* not a Bun server */ }
         try {
           const fwd = await fetch(forwardUrl, {
             method: "POST",

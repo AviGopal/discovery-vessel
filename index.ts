@@ -60,11 +60,9 @@ console.log(`[discovery-vessel] Starting server on ${HOST}:${PORT}`)
 // Self-register
 await selfRegister()
 
-// Export for Bun.serve. idleTimeout 0: a forwarded call is held open for as long as its producer's advertised bound,
-// so the server's own 10 s idle default must not cut it first (a forward's only limit is src/index.ts' signal).
+// Export for Bun.serve
 export default {
   port: PORT,
   hostname: HOST,
-  idleTimeout: 0,
   fetch: app.fetch
 }

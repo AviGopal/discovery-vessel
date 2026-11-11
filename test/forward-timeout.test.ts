@@ -42,10 +42,18 @@ describe("forward timeout", () => {
     expect((forwarded as { timeout?: unknown }).timeout).toBe(false)
     expect(forwarded?.signal).toBeDefined()
   })
-  it("[MUST-FAIL] the server holds a connection open for as long as a forward runs (no 10 s idle default)", () => {
-    // index.ts starts the server and registers on import, so its serve options are read as text.
+  it("[MUST-FAIL] the idle cut is lifted for the forwarded request only, not for the whole server", async () => {
+    await app.request("/register", { method: "POST", headers: AUTH, body: JSON.stringify({
+      vesselId: "slow", vesselName: "slow", version: "1", endpoint: "http://slow.test", shapes: ["slowShape"],
+      systemVessel: true, resolve_timeout_ms: 2_147_483_647,
+    }) })
+    const lifted: Array<[Request, number]> = []
+    const server = { timeout: (r: Request, s: number) => { lifted.push([r, s]) } }
+    const res = await app.request("/resolve", { method: "POST", headers: AUTH, body: JSON.stringify({ pointer: { type: "slowShape" } }) }, server)
+    expect(res.status).toBe(200)
+    expect(lifted.map(([, s]) => s)).toEqual([0])
+    // The serve options keep Bun's idle default for every other connection.
     const entry = readFileSync(join(import.meta.dir, "..", "index.ts"), "utf8")
-    const options = entry.slice(entry.indexOf("export default {"))
-    expect(options).toContain("idleTimeout: 0,")
+    expect(entry.slice(entry.indexOf("export default {"))).not.toContain("idleTimeout")
   })
 })
