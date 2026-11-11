@@ -434,8 +434,11 @@ export function createServer() {
               ...(c.req.header("Authorization") ? { Authorization: c.req.header("Authorization")! } : {}),
             },
             body: JSON.stringify({ impulse: { pointer } }),
+            // The producer's advertised bound is the only limit: without `timeout: false` Bun's own fetch timeout
+            // cut every forward at about 300 s, whatever the producer declared (records' long waits died there).
             signal: AbortSignal.timeout(timeoutMs),
-          })
+            timeout: false,
+          } as RequestInit)
           const fwdBody = await fwd.json()
           return c.json(fwdBody, fwd.status as 200)
         } catch (err) {
