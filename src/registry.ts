@@ -523,12 +523,17 @@ export class VesselRegistry {
    * description stands, and a vessel writing it too is logged once as a conflict.
    */
   private dataShapeConflicts = new Set<string>()
+  /** One data-shape description at most this long, the whole map at most DATA_SHAPES_MAX: a vocabulary every prompt
+   *  reads must not be floodable by one registration. A description over a cap is dropped and named, never cut. */
+  static readonly DATA_SHAPE_DESC_MAX = 1_024
+  static readonly DATA_SHAPES_MAX = 16_384
   getDataShapes(options?: { orgIds?: string[] }): Record<string, string> {
     const orgIds = options?.orgIds
     const reachable = (v: VesselRegistration): boolean =>
       !this.isExpired(v) && (!orgIds?.length || v.systemVessel === true || (v.orgId != null && orgIds.includes(v.orgId)))
     const served = new Set([...this.vessels.values()].filter((v) => !this.isExpired(v)).flatMap((v) => v.shapes))
     const out: Record<string, string> = {}
+    let total = 0
     for (const vessel of this.vessels.values()) {
       if (!reachable(vessel)) continue
       for (const shape of vessel.writes ?? []) {
@@ -541,7 +546,18 @@ export class VesselRegistry {
           continue
         }
         const desc = vessel.shape_descriptions?.[shape]
-        if (typeof desc === "string" && desc.trim() && !out[shape]) out[shape] = desc.trim()
+        if (typeof desc !== "string" || !desc.trim() || out[shape]) continue
+        const text = desc.trim()
+        if (text.length > VesselRegistry.DATA_SHAPE_DESC_MAX || total + text.length > VesselRegistry.DATA_SHAPES_MAX) {
+          const key = `${vessel.vesselId}|${shape}|size`
+          if (!this.dataShapeConflicts.has(key)) {
+            this.dataShapeConflicts.add(key)
+            console.warn(`[registry] ${vessel.vesselId} describes written ${shape} in ${text.length} chars: over the data-shape cap, dropped`)
+          }
+          continue
+        }
+        out[shape] = text
+        total += text.length
       }
     }
     return out

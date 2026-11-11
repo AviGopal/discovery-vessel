@@ -68,4 +68,11 @@ describe("shapes written but not served", () => {
     await register({ vesselId: "both", endpoint: "http://both.test", systemVessel: true, shapes: ["thing"], writes: ["thing"], shape_descriptions: { thing: "x" } })
     expect(registry.list().find((v) => v.vesselId === "both")?.writes).toBeUndefined()
   })
+  it("[MUST-FAIL] a written-shape description over the cap is dropped, not cut and not served", async () => {
+    await register({ vesselId: "walk", endpoint: "http://walk.test", systemVessel: true, shapes: ["walk_heartbeat"], writes: ["hop", "big"],
+      shape_descriptions: { hop: HOP, big: "x".repeat(5_000) } })
+    const r = await read({})
+    expect(r.data_shapes.hop).toBe(HOP)
+    expect(r.data_shapes.big).toBeUndefined()
+  })
 })
