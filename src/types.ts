@@ -159,6 +159,14 @@ export interface VesselRegistration {
    */
   shape_inputs?: Record<string, Record<string, unknown>>
 
+  /**
+   * OPTIONAL shapes this vessel WRITES as rows but does not serve (never resolvable through it), each described in
+   * shape_descriptions: the walk's hop, selection and failure rows, for instance. They never enter `shapes`, so they
+   * reach no capability lookup, routing or callable list; readers get their descriptions as data_shapes in the
+   * shapeDescriptions read. A shape some live vessel serves is never described here (sanitizeWrites, getDataShapes).
+   */
+  writes?: string[]
+
   /** Protocol for communication (defaults to http). "libp2p" = reachable over the
    *  libp2p overlay (peerId/multiaddr below) rather than a plain http endpoint. */
   protocol?: "http" | "grpc" | "ws" | "unix" | "libp2p"
@@ -469,6 +477,8 @@ export interface ShapeDescriptionsResult {
   shape_descriptions: Record<string, string>
   /** Each described shape's declared input schema, where its producer declared one. */
   shape_inputs: Record<string, Record<string, unknown>>
+  /** What the rows of shapes vessels write but do not serve are (not callable; never filtered by `declared`). */
+  data_shapes: Record<string, string>
 }
 
 export type ResolverResult =
@@ -514,6 +524,8 @@ export interface RegisterRequest {
   shape_descriptions?: Record<string, string>
   /** OPTIONAL per-shape input schema (see VesselRegistration.shape_inputs). */
   shape_inputs?: Record<string, unknown>
+  /** OPTIONAL shapes written but not served (see VesselRegistration.writes). */
+  writes?: unknown
   protocol?: string
   /** libp2p transport advertisement (federation reachability). */
   libp2p_peer_id?: string

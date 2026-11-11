@@ -518,6 +518,36 @@ export class VesselRegistry {
   }
 
   /**
+   * What each written-not-served shape is, from the live vessels the orgs can reach (scoped like getShapeDescriptions):
+   * the first writer that describes it wins. A shape any live vessel SERVES is never a data shape: the server's
+   * description stands, and a vessel writing it too is logged once as a conflict.
+   */
+  private dataShapeConflicts = new Set<string>()
+  getDataShapes(options?: { orgIds?: string[] }): Record<string, string> {
+    const orgIds = options?.orgIds
+    const reachable = (v: VesselRegistration): boolean =>
+      !this.isExpired(v) && (!orgIds?.length || v.systemVessel === true || (v.orgId != null && orgIds.includes(v.orgId)))
+    const served = new Set([...this.vessels.values()].filter((v) => !this.isExpired(v)).flatMap((v) => v.shapes))
+    const out: Record<string, string> = {}
+    for (const vessel of this.vessels.values()) {
+      if (!reachable(vessel)) continue
+      for (const shape of vessel.writes ?? []) {
+        if (served.has(shape)) {
+          const key = `${vessel.vesselId}|${shape}`
+          if (!this.dataShapeConflicts.has(key)) {
+            this.dataShapeConflicts.add(key)
+            console.warn(`[registry] ${vessel.vesselId} writes ${shape}, which a live vessel serves: the server's description stands`)
+          }
+          continue
+        }
+        const desc = vessel.shape_descriptions?.[shape]
+        if (typeof desc === "string" && desc.trim() && !out[shape]) out[shape] = desc.trim()
+      }
+    }
+    return out
+  }
+
+  /**
    * Set (upsert) a LEARNED description for a shape (auto-describe tick).
    * The learned value only surfaces in getShapeDescriptions when no live vessel
    * ADVERTISES a description for that shape (advertised-wins). Returns the stored

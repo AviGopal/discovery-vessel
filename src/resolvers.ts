@@ -314,6 +314,16 @@ export function sanitizeShapeInputs(raw: unknown, shapes: unknown): Record<strin
   return Object.keys(out).length ? out : undefined
 }
 
+/** A registration's writes: shape names it does not also serve, at most WRITES_MAX of them. */
+export const WRITES_MAX = 64
+export function sanitizeWrites(raw: unknown, shapes: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const served = new Set(Array.isArray(shapes) ? shapes.map(String) : [])
+  const out = [...new Set(raw.filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim()))]
+    .filter((s) => !served.has(s)).slice(0, WRITES_MAX)
+  return out.length ? out : undefined
+}
+
 /**
  * Resolve a shapeDescriptions impulse
  * The descriptions discovery already keeps (registry.getShapeDescriptions), scoped like GET
@@ -340,7 +350,15 @@ export async function resolveShapeDescriptions(
     shape_descriptions[shape] = text
     if (inputs[shape]) shape_inputs[shape] = inputs[shape]
   }
-  return { shape_descriptions, shape_inputs }
+  // Written-not-served shapes: data a reader meets in rows, never a call, so `declared` (which narrows what can be
+  // called) does not filter them.
+  const data_shapes: Record<string, string> = {}
+  for (const [shape, text] of Object.entries(registry.getDataShapes(scope)).sort(([a], [b]) => a.localeCompare(b))) {
+    if (wanted && !wanted.has(shape)) continue
+    if (ADDRESS.test(text)) continue
+    data_shapes[shape] = text
+  }
+  return { shape_descriptions, shape_inputs, data_shapes }
 }
 
 /**
