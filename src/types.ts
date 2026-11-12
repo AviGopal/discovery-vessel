@@ -160,6 +160,14 @@ export interface VesselRegistration {
   shape_inputs?: Record<string, Record<string, unknown>>
 
   /**
+   * OPTIONAL per-shape answer: the shape of the row a call of the shape answers with, declared by the vessel that owns
+   * it (git_diff answers a gitDiff, for instance). What is needed to make a row of some shape is then data a reader can
+   * follow (the walk's skip names the call that makes what a step still needs), not prose. Kept only for shapes in
+   * `shapes`, each a plain shape name (sanitizeShapeAnswers).
+   */
+  shape_answers?: Record<string, string>
+
+  /**
    * OPTIONAL shapes this vessel WRITES as rows but does not serve (never resolvable through it), each described in
    * shape_descriptions: the walk's hop, selection and failure rows, for instance. They never enter `shapes`, so they
    * reach no capability lookup, routing or callable list; readers get their descriptions as data_shapes in the
@@ -477,6 +485,8 @@ export interface ShapeDescriptionsResult {
   shape_descriptions: Record<string, string>
   /** Each described shape's declared input schema, where its producer declared one. */
   shape_inputs: Record<string, Record<string, unknown>>
+  /** Each described shape's declared answer shape, where its producer declared one. */
+  shape_answers: Record<string, string>
   /** What the rows of shapes vessels write but do not serve are (not callable; never filtered by `declared`). */
   data_shapes: Record<string, string>
 }
@@ -524,6 +534,8 @@ export interface RegisterRequest {
   shape_descriptions?: Record<string, string>
   /** OPTIONAL per-shape input schema (see VesselRegistration.shape_inputs). */
   shape_inputs?: Record<string, unknown>
+  /** OPTIONAL per-shape answer shape (see VesselRegistration.shape_answers). */
+  shape_answers?: unknown
   /** OPTIONAL shapes written but not served (see VesselRegistration.writes). */
   writes?: unknown
   protocol?: string

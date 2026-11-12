@@ -11,7 +11,7 @@ import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import { registry, HEARTBEAT_INTERVAL_MS } from "./registry"
-import { resolve, getResolvableShapes, sanitizeShapeInputs, sanitizeWrites } from "./resolvers"
+import { resolve, getResolvableShapes, sanitizeShapeAnswers, sanitizeShapeInputs, sanitizeWrites } from "./resolvers"
 import { metricsRegistry } from "./metrics"
 import { postToPeer, normalizePeerKey, peerAuthorization } from "./peer-credentials"
 import { admitsPeerInstance, endpointIsThisHost } from "./peer-instance"
@@ -626,6 +626,8 @@ export function createServer() {
       }
       // Per-shape input schemas, declared by the vessel next to its handlers; only advertised shapes, bounded, no addresses.
       const shapeInputs = sanitizeShapeInputs(request.shape_inputs, request.shapes)
+      // What a call of each served shape answers with (a row's shape), as data: only advertised shapes, plain names.
+      const shapeAnswers = sanitizeShapeAnswers(request.shape_answers, request.shapes)
       // Shapes written but not served: never in `shapes`, so never a producer anyone is routed to.
       const writes = sanitizeWrites(request.writes, request.shapes)
       const registration = registry.register({
@@ -648,6 +650,7 @@ export function createServer() {
         // resolver from its description alone. Backward-compatible (absent = id-only).
         shape_descriptions: request.shape_descriptions,
         ...(shapeInputs ? { shape_inputs: shapeInputs } : {}),
+        ...(shapeAnswers ? { shape_answers: shapeAnswers } : {}),
         ...(writes ? { writes } : {}),
         protocol: request.protocol as "http" | "grpc" | "ws" | "unix" | "libp2p" | undefined,
         // libp2p transport advertisement (federation reachability).
@@ -802,6 +805,7 @@ export function createServer() {
     return c.json({
       shape_descriptions: registry.getShapeDescriptions(orgIds ? { orgIds } : undefined),
       shape_inputs: registry.getShapeInputs(orgIds ? { orgIds } : undefined),
+      shape_answers: registry.getShapeAnswers(orgIds ? { orgIds } : undefined),
       data_shapes: registry.getDataShapes(orgIds ? { orgIds } : undefined),
     })
   })

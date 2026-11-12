@@ -517,6 +517,21 @@ export class VesselRegistry {
     return out
   }
 
+  /** Each served shape's declared answer shape, from the live vessels the orgs can reach (scoped like getShapeInputs). */
+  getShapeAnswers(options?: { orgIds?: string[] }): Record<string, string> {
+    const orgIds = options?.orgIds
+    const out: Record<string, string> = {}
+    for (const vessel of this.vessels.values()) {
+      if (this.isExpired(vessel)) continue
+      if (orgIds?.length && !(vessel.systemVessel === true || (vessel.orgId != null && orgIds.includes(vessel.orgId)))) continue
+      const advertised = new Set(vessel.shapes)
+      for (const [shape, answer] of Object.entries(vessel.shape_answers ?? {})) {
+        if (advertised.has(shape) && !out[shape]) out[shape] = answer
+      }
+    }
+    return out
+  }
+
   /**
    * What each written-not-served shape is, from the live vessels the orgs can reach (scoped like getShapeDescriptions):
    * the first writer that describes it wins. A shape any live vessel SERVES is never a data shape: the server's
