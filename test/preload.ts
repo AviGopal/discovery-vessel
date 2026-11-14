@@ -11,3 +11,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 process.env.DISCOVERY_LEARNED_DESCRIPTIONS_PATH = join(mkdtempSync(join(tmpdir(), "discovery-learned-")), "learned.json")
+
+// The published-port set (resolvers.ts publishedPorts) is the node's launch manifest. A test run on a node would read
+// that node's manifest and withhold public endpoints its fixtures expect; tests that exercise the set pass their own.
+// Unset here, for the same reason as above, so no test depends on the host it runs on.
+process.env.SUBSTRATE_MANIFEST = join(mkdtempSync(join(tmpdir(), "discovery-manifest-")), "absent.yml")
+delete process.env.SUBSTRATE_PUBLISHED_PORTS

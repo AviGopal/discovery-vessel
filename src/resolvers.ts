@@ -5,6 +5,7 @@
  * Each resolver loads content where the data lives (the registry).
  */
 
+import { readFileSync } from "node:fs"
 import { registry } from "./registry"
 import { discoveryMetrics } from "./metrics"
 import type {
@@ -34,6 +35,43 @@ import type {
  */
 const PUBLIC_PORT_OFFSET = parseInt(process.env.DISCOVERY_PUBLIC_PORT_OFFSET ?? "10000", 10);
 
+const LOOPBACK_PUBLIC = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/;
+
+/**
+ * The container ports this node's launch publishes, from the launch manifest baked into the image (one list, the one
+ * substrate-status reads): each `ports:` entry's last number, in any form compose accepts. SUBSTRATE_PUBLISHED_PORTS
+ * (space-separated) stands in for it. null when neither can be read: then nothing is withheld, as before.
+ */
+export function parsePublishedPorts(manifest: string): Set<number> {
+  const out = new Set<number>();
+  let inPorts = false;
+  for (const line of manifest.split("\n")) {
+    if (/^\s*ports:/.test(line)) { inPorts = true; continue; }
+    if (inPorts && /^\s*[a-z_]+:/.test(line)) inPorts = false;
+    if (!inPorts) continue;
+    const m = /^\s*-\s*"?[^"#]*:(\d{2,5})(\/tcp)?"?\s*(#.*)?$/.exec(line);
+    if (m) out.add(parseInt(m[1]!, 10));
+  }
+  return out;
+}
+const PUBLISHED_TTL_MS = 60_000;
+let publishedCache: { at: number; ports: Set<number> | null } | undefined;
+export function publishedPorts(now: number = Date.now()): Set<number> | null {
+  if (publishedCache && now - publishedCache.at < PUBLISHED_TTL_MS) return publishedCache.ports;
+  let ports: Set<number> | null = null;
+  const listed = process.env.SUBSTRATE_PUBLISHED_PORTS;
+  if (listed && listed.trim()) {
+    ports = new Set(listed.trim().split(/\s+/).map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x)));
+  } else {
+    try {
+      ports = parsePublishedPorts(readFileSync(process.env.SUBSTRATE_MANIFEST ?? "/usr/local/share/substrate/docker-compose.yml", "utf8"));
+      if (ports.size === 0) ports = null;
+    } catch { ports = null; }
+  }
+  publishedCache = { at: now, ports };
+  return ports;
+}
+
 /**
  * Derive a host-reachable public_endpoint from an in-container endpoint when the
  * vessel did not advertise one explicitly. Only rewrites loopback endpoints
@@ -45,10 +83,16 @@ const PUBLIC_PORT_OFFSET = parseInt(process.env.DISCOVERY_PUBLIC_PORT_OFFSET ?? 
 export function derivePublicEndpoint(
   endpoint: string | undefined,
   explicit: string | undefined,
+  published: Set<number> | null = publishedPorts(),
 ): string | undefined {
+  const m = endpoint?.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:)(\d+)(.*)$/);
+  // A loopback public_endpoint for a container port the launch does not publish names a host port nothing
+  // answers on, and a peer re-homes it onto this host as a dead row (index.ts rehomeLoopbackPeerRow). With none, the
+  // peer marks the row endpoint_unreachable and dials it over the overlay instead. Only a loopback public_endpoint
+  // is withheld: a real host the vessel names is its own claim.
+  if (m && published && !published.has(parseInt(m[4] ?? "", 10)) && (!explicit || LOOPBACK_PUBLIC.test(explicit))) return undefined;
   if (explicit) return explicit;
   if (!endpoint || !PUBLIC_PORT_OFFSET) return explicit;
-  const m = endpoint.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:)(\d+)(.*)$/);
   if (!m) return undefined;
   const port = parseInt(m[4] ?? "", 10);
   if (!(port >= 8000 && port < 9000)) return undefined;
