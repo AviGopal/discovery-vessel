@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "bun:test"
 import { stampPeerRow } from "../src/index"
-import { derivePublicEndpoint, parsePublishedPorts } from "../src/resolvers"
+import { derivePublicEndpoint, parsePublishedPorts, publishedPorts } from "../src/resolvers"
 
 const MANIFEST = [
   "services:",
@@ -52,5 +52,30 @@ describe("a public_endpoint for an unpublished port", () => {
     const row = stampPeerRow(answered, "http://hub.example:18100")
     expect(row.endpoint_unreachable).toBe(true)
     expect(String(row.endpoint)).not.toContain("hub.example:18510")
+  })
+})
+
+describe("whether the published set could be read", () => {
+  it("[MUST-FAIL] is said once when it cannot be (nothing withheld), and again only when that changes", () => {
+    const said: string[] = []
+    const log = console.log
+    console.log = (...a: unknown[]) => { said.push(a.map(String).join(" ")) }
+    try {
+      // The preload points the manifest at an absent file. Each call is past the cache, so each reads again.
+      const t0 = 10_000_000
+      expect(publishedPorts(t0)).toBeNull()
+      expect(publishedPorts(t0 + 120_000)).toBeNull()
+      process.env.SUBSTRATE_PUBLISHED_PORTS = "8100 8310"
+      expect([...publishedPorts(t0 + 240_000)!].sort()).toEqual([8100, 8310])
+      expect(publishedPorts(t0 + 360_000)).not.toBeNull()
+      delete process.env.SUBSTRATE_PUBLISHED_PORTS
+    } finally {
+      console.log = log
+    }
+    const unreadable = said.filter((l) => l.startsWith("[discovery] published ports unreadable"))
+    const read = said.filter((l) => l.startsWith("[discovery] published ports read"))
+    expect(unreadable.length).toBeLessThanOrEqual(1)
+    expect(read).toHaveLength(1)
+    expect(said.some((l) => l.includes("nothing withheld") && l.includes("absent.yml"))).toBe(unreadable.length === 1)
   })
 })

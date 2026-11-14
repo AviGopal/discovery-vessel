@@ -56,17 +56,27 @@ export function parsePublishedPorts(manifest: string): Set<number> {
 }
 const PUBLISHED_TTL_MS = 60_000;
 let publishedCache: { at: number; ports: Set<number> | null } | undefined;
+// Whether the published set was readable when last read, said when it changes: an unreadable launch manifest falls
+// back to deriving every public port, which is the dead-row behaviour, so an operator must be able to see it.
+let publishedKnown: boolean | undefined;
 export function publishedPorts(now: number = Date.now()): Set<number> | null {
   if (publishedCache && now - publishedCache.at < PUBLISHED_TTL_MS) return publishedCache.ports;
   let ports: Set<number> | null = null;
+  const manifest = process.env.SUBSTRATE_MANIFEST ?? "/usr/local/share/substrate/docker-compose.yml";
   const listed = process.env.SUBSTRATE_PUBLISHED_PORTS;
   if (listed && listed.trim()) {
     ports = new Set(listed.trim().split(/\s+/).map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x)));
   } else {
     try {
-      ports = parsePublishedPorts(readFileSync(process.env.SUBSTRATE_MANIFEST ?? "/usr/local/share/substrate/docker-compose.yml", "utf8"));
+      ports = parsePublishedPorts(readFileSync(manifest, "utf8"));
       if (ports.size === 0) ports = null;
     } catch { ports = null; }
+  }
+  if (publishedKnown !== (ports !== null)) {
+    publishedKnown = ports !== null;
+    console.log(publishedKnown
+      ? `[discovery] published ports read (${ports!.size}); a loopback public_endpoint is withheld for any other container port`
+      : `[discovery] published ports unreadable (${manifest}, or SUBSTRATE_PUBLISHED_PORTS): nothing withheld, every loopback port gets a derived public_endpoint`);
   }
   publishedCache = { at: now, ports };
   return ports;
