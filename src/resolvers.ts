@@ -59,6 +59,8 @@ let publishedCache: { at: number; ports: Set<number> | null } | undefined;
 // Whether the published set was readable when last read, said when it changes: an unreadable launch manifest falls
 // back to deriving every public port, which is the dead-row behaviour, so an operator must be able to see it.
 let publishedKnown: boolean | undefined;
+/** Forget the cached set and the last state said, so the next read reads afresh: for tests, which run in one process. */
+export function forgetPublishedPorts(): void { publishedCache = undefined; publishedKnown = undefined; }
 export function publishedPorts(now: number = Date.now()): Set<number> | null {
   if (publishedCache && now - publishedCache.at < PUBLISHED_TTL_MS) return publishedCache.ports;
   let ports: Set<number> | null = null;
