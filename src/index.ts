@@ -265,9 +265,12 @@ export function callerMayWrite(auth: { scopes?: unknown } | undefined): boolean 
 // first successful resolution. Reads the peer set at USE TIME and is depth-limited,
 // so a late-federated spoke participates and peer→peer can't recurse unbounded.
 // A state-changing shape is sent on to the next peer only when the last one cannot have stored it: no credential for
-// it (nothing sent), it was unreachable, or it has no producer (404). Any other answer (the owner's refusal, or a
-// failure after the owner may have stored) is the write's answer, and a timeout may have stored it too: sending it
-// again to a peer that reaches the same owner would store it twice.
+// it (nothing sent), a connection never opened (NOT_SENT: refused, no such host), or no producer (404). Any other answer
+// (the owner's refusal, a failure after the owner may have stored, a 2xx whose body does not parse) is the write's
+// answer, and any other throw (a timeout, a reset after the request went out, a redirect, which is the peer's reply) may
+// have stored it too: sending it again to a peer that reaches the same owner would store it twice.
+// The fetch error codes that prove a request never left: the connection was refused or the host does not resolve.
+const NOT_SENT = new Set(["ConnectionRefused", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "FailedToOpenSocket"])
 async function forwardResolveToPeers(
   pointer: DiscoveryPointer,
   depth: number,
@@ -280,26 +283,35 @@ async function forwardResolveToPeers(
   if (peers.length === 0) return undefined
   const once = isStateChangingShape(pointer.type)
   for (const peer of peers) {
+    let res: Response | undefined
     try {
-      const res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 10000 })
-      if (!res) continue // mapped credential unavailable: nothing was sent — try the next
-      if (!res.ok && once && res.status !== 404) {
-        void recordPeerSetConsumption(selection, false)
-        return { body: await res.json().catch(() => ({ error: res.statusText, shape: pointer.type })), status: res.status }
-      }
-      if (!res.ok) continue // 404 / error — try the next
-      const body = await res.json()
-      // GRADE BY CONSUMPTION: a peer in the selected set ANSWERED — 2xx with a parseable body, the same
-      // "answered" definition forwardToPeers uses (a 4xx/5xx/throw is not-answered in both). Fail-open, non-blocking.
-      void recordPeerSetConsumption(selection, true)
-      return { body, status: res.status }
+      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 10000 })
     } catch (e) {
-      if (once && (e as { name?: unknown })?.name === "TimeoutError") {
+      if (once && !NOT_SENT.has(String((e as { code?: unknown })?.code ?? ""))) {
         void recordPeerSetConsumption(selection, false)
-        return { body: { error: "peer_timeout", shape: pointer.type, detail: "the write may have been stored, so it is not sent to another peer" }, status: 504 }
+        const timedOut = (e as { name?: unknown })?.name === "TimeoutError"
+        return { body: { error: timedOut ? "peer_timeout" : "peer_failed_after_send", shape: pointer.type, detail: "the write may have been stored, so it is not sent to another peer" }, status: timedOut ? 504 : 502 }
       }
-      /* peer unreachable / timed out — try the next peer */
+      continue // peer unreachable / timed out — try the next peer
     }
+    if (!res) continue // mapped credential unavailable: nothing was sent — try the next
+    if (!res.ok && once && res.status !== 404) {
+      void recordPeerSetConsumption(selection, false)
+      return { body: await res.json().catch(() => ({ error: res!.statusText, shape: pointer.type })), status: res.status }
+    }
+    if (!res.ok) continue // 404 / error — try the next
+    const text = await res.text().catch(() => "")
+    let body: unknown
+    try { body = JSON.parse(text) } catch {
+      if (!once) continue // a read's unparseable answer — try the next
+      // A write the peer answered 2xx: stored, whatever its body says.
+      void recordPeerSetConsumption(selection, false)
+      return { body: { raw: text.slice(0, 4000), shape: pointer.type }, status: res.status }
+    }
+    // GRADE BY CONSUMPTION: a peer in the selected set ANSWERED — 2xx with a parseable body, the same
+    // "answered" definition forwardToPeers uses (a 4xx/5xx/throw is not-answered in both). Fail-open, non-blocking.
+    void recordPeerSetConsumption(selection, true)
+    return { body, status: res.status }
   }
   // No peer in the selected set answered (no 2xx-with-body) — credit the selection as not reached.
   void recordPeerSetConsumption(selection, false)
