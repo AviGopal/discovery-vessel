@@ -384,9 +384,6 @@ export class VesselRegistry {
   }
 
   /**
-   * List all vessels with optional filters
-   */
-  /**
    * Rows that mirror another substrate's vessels (`<vessel>@<substrate>`), and how many of them a vessel of this node
    * could be routed to: a system vessel's, or one whose org is an org this node's own vessels register under. A peer row
    * that is listed but not reachable is what makes a shape look served here while every call to it 404s. Counts only:
@@ -403,6 +400,9 @@ export class VesselRegistry {
     }
   }
 
+  /**
+   * List all vessels with optional filters
+   */
   list(filters?: { shapes?: string[]; status?: string[]; orgId?: string }): VesselRegistration[] {
     let results = Array.from(this.vessels.values())
       .filter(v => !this.isExpired(v))
