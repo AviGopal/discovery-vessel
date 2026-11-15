@@ -334,7 +334,9 @@ export function createServer() {
       vessel: "discovery",
       version: VERSION,
       registeredVessels: stats.totalVessels,
-      uptime: Math.floor((Date.now() - startTime) / 1000)
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      // Peer rows listed here, and how many a local vessel's org could be routed to (counts only).
+      ...registry.peerReach(),
     }
     return c.json(response)
   })

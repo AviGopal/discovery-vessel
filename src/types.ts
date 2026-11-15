@@ -635,4 +635,8 @@ export interface HealthResponse {
   version: string
   registeredVessels: number
   uptime: number
+  /** rows mirroring another substrate's vessels */
+  peer_rows?: number
+  /** of those, how many a local vessel's org could be routed to */
+  peer_rows_reachable?: number
 }
