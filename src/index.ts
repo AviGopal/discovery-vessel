@@ -428,7 +428,9 @@ export function createServer() {
           const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
           const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
-          return c.json({ error: "Not found", shape: pointer.type }, 404)
+          // No producer here or on any peer: the call never reached one. Said as a field (unserved: the shape), so a
+          // caller can tell this answer, discovery's own, from a producer's 404 about what it was asked.
+          return c.json({ error: "Not found", shape: pointer.type, unserved: pointer.type }, 404)
         }
         // Prefer the normalized first-class distribution_policy (registry fills it
         // from the field OR metadata.duplicate_policy); fall back to raw metadata for

@@ -55,6 +55,13 @@ describe("shapes written but not served", () => {
     expect(routed.status).toBe(404)
   })
 
+  it("[MUST-FAIL] discovery's own answer for a shape no one serves says unserved, so a caller can tell it from a producer's 404", async () => {
+    const routed = await app.request("/resolve", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "ApiKey sys" },
+      body: JSON.stringify({ pointer: { type: "nobody_serves_this" } }) })
+    expect(routed.status).toBe(404)
+    expect(await routed.json()).toEqual({ error: "Not found", shape: "nobody_serves_this", unserved: "nobody_serves_this" })
+  })
+
   it("[MUST-FAIL] a shape some vessel serves keeps the server's description; a writer cannot override it", async () => {
     await register({ vesselId: "server", endpoint: "http://server.test", systemVessel: true, shapes: ["thing"], shape_descriptions: { thing: "Served thing." } })
     await register({ vesselId: "writer", endpoint: "http://writer.test", systemVessel: true, shapes: ["walk_heartbeat"], writes: ["thing"],
