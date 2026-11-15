@@ -639,4 +639,6 @@ export interface HealthResponse {
   peer_rows?: number
   /** of those, how many a local vessel's org could be routed to */
   peer_rows_reachable?: number
+  /** of those, how many are also healthy (what /resolve would route to) */
+  peer_rows_healthy_reachable?: number
 }

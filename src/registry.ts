@@ -386,17 +386,20 @@ export class VesselRegistry {
   /**
    * Rows that mirror another substrate's vessels (`<vessel>@<substrate>`), and how many of them a vessel of this node
    * could be routed to: a system vessel's, or one whose org is an org this node's own vessels register under. A peer row
-   * that is listed but not reachable is what makes a shape look served here while every call to it 404s. Counts only:
-   * no org is named.
+   * that is listed but not reachable (by org, or by health) is what makes a shape look served here while every call to it
+   * 404s. Counts only: no org is named.
    */
-  peerReach(): { peer_rows: number; peer_rows_reachable: number } {
+  peerReach(): { peer_rows: number; peer_rows_reachable: number; peer_rows_healthy_reachable: number } {
     const live = [...this.vessels.values()].filter((v) => !this.isExpired(v))
     const peer = (v: VesselRegistration): boolean => v.vesselId.includes("@")
     const localOrgs = new Set(live.filter((v) => !peer(v) && typeof v.orgId === "string").map((v) => v.orgId as string))
     const peers = live.filter(peer)
+    const reachable = peers.filter((v) => v.systemVessel === true || (typeof v.orgId === "string" && localOrgs.has(v.orgId)))
     return {
       peer_rows: peers.length,
-      peer_rows_reachable: peers.filter((v) => v.systemVessel === true || (typeof v.orgId === "string" && localOrgs.has(v.orgId))).length,
+      peer_rows_reachable: reachable.length,
+      // /resolve also routes only to healthy rows: reachable by org but unhealthy is a different cause (deployment)
+      peer_rows_healthy_reachable: reachable.filter((v) => v.status === "healthy").length,
     }
   }
 
