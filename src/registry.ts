@@ -397,7 +397,9 @@ export class VesselRegistry {
    * none, undefined (the forward keeps its default). Nothing is remembered: a peer row that goes takes its bound with it.
    */
   peerBoundFor(shape: string, orgId?: string): number | undefined {
-    const bounds = this.findByShape(shape, orgId ? { orgId } : undefined)
+    // A caller with no org is served by no org's rows here, so no peer row's bound is its (qa): the default stands.
+    if (!orgId) return undefined
+    const bounds = this.findByShape(shape, { orgId })
       .filter((v) => v.vesselId.includes("@") && typeof v.resolve_timeout_ms === "number" && Number.isFinite(v.resolve_timeout_ms) && v.resolve_timeout_ms > 0)
       .map((v) => v.resolve_timeout_ms as number)
     return bounds.length > 0 ? Math.max(...bounds) : undefined

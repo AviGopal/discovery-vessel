@@ -56,8 +56,10 @@ afterEach(() => {
 
 // the peer answers after `after` ms unless the forward's signal aborts first
 let after = 10_500
-const mirror = (bound?: number) => registry.register({ vesselId: "producer@peer", vesselName: "producer@peer", version: "1",
-  endpoint: "http://127.0.0.1:1", shapes: ["slow_shape"], systemVessel: true, protocol: "libp2p", ...(bound !== undefined ? { resolve_timeout_ms: bound } : {}) } as never)
+const mirror = (bound?: number, orgId?: string) => registry.register({ vesselId: orgId ? `producer@${orgId}` : "producer@peer", vesselName: "producer@peer", version: "1",
+  endpoint: "http://127.0.0.1:1", shapes: ["slow_shape"], protocol: "libp2p", ...(orgId ? { orgId } : { systemVessel: true }),
+  ...(bound !== undefined ? { resolve_timeout_ms: bound } : {}) } as never)
+const unroutable = () => registry.list().filter((v) => v.vesselId.startsWith("producer@")).forEach((v) => { v.status = "unhealthy" as never })
 const resolve = () => app.request("/resolve", { method: "POST", headers: AUTH, body: JSON.stringify({ pointer: { type: "slow_shape" } }) })
 
 describe("forward bound", () => {
@@ -93,5 +95,28 @@ describe("forward bound", () => {
       shapes: ["slow_shape"], orgId: "org-stranger", protocol: "libp2p", resolve_timeout_ms: 30_000 } as never)
     expect(registry.peerBoundFor("slow_shape", "org-test")).toBeUndefined()
     expect(registry.peerBoundFor("slow_shape", "org-stranger")).toBe(30_000)
+  })
+
+  it("[MUST-FAIL] through /resolve: an own-org peer row at 30 s lets a 10.5 s answer through (the caller's org reaches the bound)", async () => {
+    after = 10_500
+    mirror(30_000, "org-test")
+    unroutable()
+    const res = await resolve()
+    expect(res.status).toBe(200)
+  }, 20_000)
+
+  it("[MUST-FAIL] through /resolve: another org's peer row at 30 s does not: the 10.5 s answer is cut at the 10 s default", async () => {
+    after = 10_500
+    mirror(30_000, "org-stranger")
+    unroutable()
+    const t0 = Date.now()
+    const res = await resolve()
+    expect(res.status).not.toBe(200)
+    expect(Date.now() - t0).toBeLessThan(10_400)
+  }, 20_000)
+
+  it("[MUST-FAIL] a caller with no org takes no peer row's bound (qa)", () => {
+    mirror(30_000, "org-stranger")
+    expect(registry.peerBoundFor("slow_shape", undefined)).toBeUndefined()
   })
 })
