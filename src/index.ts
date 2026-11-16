@@ -285,7 +285,9 @@ async function forwardResolveToPeers(
   for (const peer of peers) {
     let res: Response | undefined
     try {
-      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: 10000 })
+      // As long as a producer of this shape says a call may take (registry.boundFor); a shape no producer here has ever
+      // bounded keeps the old 10 s.
+      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: registry.boundFor(pointer.type) ?? 10000 })
     } catch (e) {
       if (once && !NOT_SENT.has(String((e as { code?: unknown })?.code ?? ""))) {
         void recordPeerSetConsumption(selection, false)

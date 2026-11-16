@@ -41,6 +41,10 @@ export class VesselRegistry {
 
   /** shape -> Set of vesselIds that can resolve it */
   private shapeIndex = new Map<string, Set<string>>()
+  // The longest resolve bound any producer has advertised for each shape (resolve_timeout_ms at registration), kept after
+  // that producer drops the shape: a call this node forwards to a peer for a shape it cannot serve now waits as long as a
+  // producer of it said a call may take (the USER, 11-15: "Use producer's bound"), not a fixed time.
+  private shapeBounds = new Map<string, number>()
 
   /** orgId -> Set of vesselIds */
   private orgIndex = new Map<string, Set<string>>()
@@ -269,7 +273,11 @@ export class VesselRegistry {
     this.vessels.set(registration.vesselId, record)
 
     // Index by shapes
+    const bound = registration.resolve_timeout_ms
     for (const shape of registration.shapes) {
+      if (typeof bound === "number" && Number.isFinite(bound) && bound > 0 && bound > (this.shapeBounds.get(shape) ?? 0)) {
+        this.shapeBounds.set(shape, bound)
+      }
       if (!this.shapeIndex.has(shape)) {
         this.shapeIndex.set(shape, new Set())
       }
@@ -389,6 +397,11 @@ export class VesselRegistry {
    * that is listed but not reachable (by org, or by health) is what makes a shape look served here while every call to it
    * 404s. Counts only: no org is named.
    */
+  /** The longest resolve bound a producer of this shape has advertised here, or undefined if none ever did. */
+  boundFor(shape: string): number | undefined {
+    return this.shapeBounds.get(shape)
+  }
+
   peerReach(): { peer_rows: number; peer_rows_reachable: number; peer_rows_healthy_reachable: number } {
     const live = [...this.vessels.values()].filter((v) => !this.isExpired(v))
     const peer = (v: VesselRegistration): boolean => v.vesselId.includes("@")
