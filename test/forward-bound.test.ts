@@ -1,7 +1,7 @@
 /**
- * A call forwarded to a peer, for a shape no producer here serves now, waits as long as a producer of that shape has
- * said a call may take (its resolve_timeout_ms, remembered after it drops the shape), not a fixed 10 s (the USER, 11-15:
- * "Use producer's bound"). Live: node1's llm-resolver went dark, its llm_completion calls were forwarded to the hub,
+ * A call forwarded to a peer, for a shape no producer here serves now, waits as long as the peers' producers of that shape
+ * say a call may take (resolve_timeout_ms on the rows mirrored here from them), not a fixed 10 s (the USER, 11-15:
+ * "Use producer's bound"). Nothing is remembered from a local producer. Live: node1's llm-resolver went dark, its llm_completion calls were forwarded to the hub,
  * and every one longer than 10 s was cut, though the hub's producer would have answered.
  * The peer is a stub behind an injected globalThis.fetch that answers after 10.5 s unless its signal aborts first.
  */
@@ -32,7 +32,7 @@ beforeEach(() => {
     if (!url.startsWith(PEER)) return Response.json({ error: "Not found" }, { status: 404 })
     // the peer's producer takes 10.5 s; a forward cut earlier sees its signal abort
     return await new Promise<Response>((resolve, reject) => {
-      const t = setTimeout(() => resolve(Response.json({ resolved: true, shape: "slow_shape", content: "late answer" })), 10_500)
+      const t = setTimeout(() => resolve(Response.json({ resolved: true, shape: "slow_shape", content: "late answer" })), after)
       init?.signal?.addEventListener("abort", () => { clearTimeout(t); reject(Object.assign(new Error("The operation timed out."), { name: "TimeoutError" })) })
     })
   }) as unknown as typeof fetch
@@ -54,25 +54,37 @@ afterEach(() => {
   __resetPeerCredentialState()
 })
 
+// the peer answers after `after` ms unless the forward's signal aborts first
+let after = 10_500
+const mirror = (bound?: number) => registry.register({ vesselId: "producer@peer", vesselName: "producer@peer", version: "1",
+  endpoint: "http://127.0.0.1:1", shapes: ["slow_shape"], systemVessel: true, protocol: "libp2p", ...(bound !== undefined ? { resolve_timeout_ms: bound } : {}) } as never)
+const resolve = () => app.request("/resolve", { method: "POST", headers: AUTH, body: JSON.stringify({ pointer: { type: "slow_shape" } }) })
+
 describe("forward bound", () => {
-  it("[MUST-FAIL] a forwarded call slower than 10 s answers 200 when a producer of the shape advertised a longer bound", async () => {
-    // a local producer of the shape registers its bound, then drops the shape (it went dark)
-    const reg = await app.request("/register", { method: "POST", headers: AUTH, body: JSON.stringify({
-      vesselId: "local-producer", vesselName: "local-producer", version: "1", endpoint: "http://local.test", shapes: ["slow_shape"],
-      systemVessel: true, resolve_timeout_ms: 30_000,
-    }) })
-    expect(reg.status).toBe(201)
-    registry.unregister("local-producer")
-    expect(registry.boundFor("slow_shape")).toBe(30_000)
-    const res = await app.request("/resolve", { method: "POST", headers: AUTH, body: JSON.stringify({ pointer: { type: "slow_shape" } }) })
+  it("[MUST-FAIL] (a) a peer row bounding the shape at 30 s: a forwarded call answering at 10.5 s returns 200", async () => {
+    after = 10_500
+    mirror(30_000)
+    registry.list().filter((v) => v.vesselId === "producer@peer").forEach((v) => { v.status = "unhealthy" as never }) // listed, not routed to directly
+    const res = await resolve()
     expect(res.status).toBe(200)
     expect(JSON.stringify(await res.json())).toContain("late answer")
   }, 20_000)
 
-  it("the longest bound advertised for a shape is kept; one never bounded has none", () => {
-    registry.register({ vesselId: "a", vesselName: "a", version: "1", endpoint: "http://a.test", shapes: ["s"], systemVessel: true, resolve_timeout_ms: 5_000 } as never)
-    registry.register({ vesselId: "b", vesselName: "b", version: "1", endpoint: "http://b.test", shapes: ["s"], systemVessel: true, resolve_timeout_ms: 2_000 } as never)
-    expect(registry.boundFor("s")).toBe(5_000)
-    expect(registry.boundFor("never-bounded")).toBeUndefined()
+  it("[MUST-FAIL] (b) a peer row bounding it at 5 s cuts a 6 s answer at 5 s, whatever a local producer once advertised", async () => {
+    after = 6_000
+    registry.register({ vesselId: "local-producer", vesselName: "local-producer", version: "1", endpoint: "http://local.test", shapes: ["slow_shape"], systemVessel: true, resolve_timeout_ms: 30_000 } as never)
+    registry.unregister("local-producer")
+    mirror(5_000)
+    registry.list().filter((v) => v.vesselId === "producer@peer").forEach((v) => { v.status = "unhealthy" as never })
+    const t0 = Date.now()
+    const res = await resolve()
+    expect(res.status).not.toBe(200)
+    expect(Date.now() - t0).toBeLessThan(5_900)
+  }, 20_000)
+
+  it("(c) no peer row bounds it: the default 10 s, as before", () => {
+    mirror()
+    expect(registry.peerBoundFor("slow_shape")).toBeUndefined()
+    expect(registry.peerBoundFor("never-mirrored")).toBeUndefined()
   })
 })
