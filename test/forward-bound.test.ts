@@ -87,4 +87,11 @@ describe("forward bound", () => {
     expect(registry.peerBoundFor("slow_shape")).toBeUndefined()
     expect(registry.peerBoundFor("never-mirrored")).toBeUndefined()
   })
+
+  it("[MUST-FAIL] another org's peer row bounding the shape at 30 s does not lift the 10 s default (qa)", () => {
+    registry.register({ vesselId: "producer@stranger", vesselName: "producer@stranger", version: "1", endpoint: "http://127.0.0.1:2",
+      shapes: ["slow_shape"], orgId: "org-stranger", protocol: "libp2p", resolve_timeout_ms: 30_000 } as never)
+    expect(registry.peerBoundFor("slow_shape", "org-test")).toBeUndefined()
+    expect(registry.peerBoundFor("slow_shape", "org-stranger")).toBe(30_000)
+  })
 })

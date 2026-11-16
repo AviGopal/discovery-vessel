@@ -391,12 +391,13 @@ export class VesselRegistry {
    */
   /**
    * How long a call forwarded to a peer for this shape may take: the bound the peers' producers advertise, as the rows
-   * mirrored here from them carry it (resolve_timeout_ms on a `<vessel>@<substrate>` row, live, healthy or not). The
-   * forward goes to a peer's discovery, not to one row, so it is the largest such bound; with none, undefined (the
-   * forward keeps its default). Nothing is remembered: a peer row that goes takes its bound with it.
+   * mirrored here from them carry it (resolve_timeout_ms on a `<vessel>@<substrate>` row, live, healthy or not), of rows
+   * the caller could be served by (its org's, or a system row: the /resolve rule), so another org's row cannot make our
+   * forwards wait (qa). The forward goes to a peer's discovery, not to one row, so it is the largest such bound; with
+   * none, undefined (the forward keeps its default). Nothing is remembered: a peer row that goes takes its bound with it.
    */
-  peerBoundFor(shape: string): number | undefined {
-    const bounds = this.findByShape(shape)
+  peerBoundFor(shape: string, orgId?: string): number | undefined {
+    const bounds = this.findByShape(shape, orgId ? { orgId } : undefined)
       .filter((v) => v.vesselId.includes("@") && typeof v.resolve_timeout_ms === "number" && Number.isFinite(v.resolve_timeout_ms) && v.resolve_timeout_ms > 0)
       .map((v) => v.resolve_timeout_ms as number)
     return bounds.length > 0 ? Math.max(...bounds) : undefined

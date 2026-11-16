@@ -275,6 +275,7 @@ async function forwardResolveToPeers(
   pointer: DiscoveryPointer,
   depth: number,
   authHeader: string | undefined,
+  callerOrg?: string,
 ): Promise<{ body: unknown; status: number } | undefined> {
   if (depth >= MAX_PEER_DEPTH) return undefined
   // PEER-SET SOURCE (activity discovery-vessel:peer-set-source): see forwardToPeers.
@@ -287,7 +288,7 @@ async function forwardResolveToPeers(
     try {
       // As long as the peers' producers of this shape say a call may take (the bound their mirrored rows carry); with
       // none, 10 s as before. No caller sends a deadline of its own yet, so none caps it.
-      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: registry.peerBoundFor(pointer.type) ?? 10000 })
+      res = await postToPeer({ peer, pointer, depth, authHeader, timeoutMs: registry.peerBoundFor(pointer.type, callerOrg) ?? 10000 })
     } catch (e) {
       if (once && !NOT_SENT.has(String((e as { code?: unknown })?.code ?? ""))) {
         void recordPeerSetConsumption(selection, false)
@@ -430,7 +431,7 @@ export function createServer() {
             return c.json({ error: "caller_lacks_write_scope", shape: pointer.type, detail: "a state-changing shape with no local producer is forwarded only for a caller whose own scopes include write or admin" }, 403)
           }
           const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
-          const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"))
+          const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"), auth?.orgId)
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           // No producer here or on any peer: the call never reached one. Said as a field (unserved: the shape), so a
           // caller can tell this answer, discovery's own, from a producer's 404 about what it was asked.
