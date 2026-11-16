@@ -59,7 +59,7 @@ let after = 10_500
 const mirror = (bound?: number, orgId?: string) => registry.register({ vesselId: orgId ? `producer@${orgId}` : "producer@peer", vesselName: "producer@peer", version: "1",
   endpoint: "http://127.0.0.1:1", shapes: ["slow_shape"], protocol: "libp2p", ...(orgId ? { orgId } : { systemVessel: true }),
   ...(bound !== undefined ? { resolve_timeout_ms: bound } : {}) } as never)
-const unroutable = () => registry.list().filter((v) => v.vesselId.startsWith("producer@")).forEach((v) => { v.status = "unhealthy" as never })
+const unroutable = () => registry.list().filter((v) => v.vesselId.includes("@")).forEach((v) => { v.status = "unhealthy" as never })
 const resolve = () => app.request("/resolve", { method: "POST", headers: AUTH, body: JSON.stringify({ pointer: { type: "slow_shape" } }) })
 
 describe("forward bound", () => {
@@ -119,4 +119,40 @@ describe("forward bound", () => {
     mirror(30_000, "org-stranger")
     expect(registry.peerBoundFor("slow_shape", undefined)).toBeUndefined()
   })
+
+  it("[MUST-FAIL] two peer rows bound the shape: the larger bound is the one waited (deployment)", () => {
+    mirror(5_000, "org-test")
+    registry.register({ vesselId: "producer2@org-test", vesselName: "producer2@org-test", version: "1", endpoint: "http://127.0.0.1:3",
+      shapes: ["slow_shape"], orgId: "org-test", protocol: "libp2p", resolve_timeout_ms: 30_000 } as never)
+    expect(registry.peerBoundFor("slow_shape", "org-test")).toBe(30_000)
+  })
+
+  it("[MUST-FAIL] a local row's bound is not a peer's: only mirrored rows count (deployment)", () => {
+    registry.register({ vesselId: "local-producer", vesselName: "local-producer", version: "1", endpoint: "http://local.test",
+      shapes: ["slow_shape"], orgId: "org-test", resolve_timeout_ms: 30_000 } as never)
+    expect(registry.peerBoundFor("slow_shape", "org-test")).toBeUndefined()
+  })
+
+  it("[MUST-FAIL] through /resolve: own-org peer rows at 5 s and 30 s let a 10.5 s answer through (the larger bound; qa)", async () => {
+    after = 10_500
+    mirror(5_000, "org-test")
+    registry.register({ vesselId: "producer2@org-test", vesselName: "producer2@org-test", version: "1", endpoint: "http://127.0.0.1:3",
+      shapes: ["slow_shape"], orgId: "org-test", protocol: "libp2p", resolve_timeout_ms: 30_000 } as never)
+    unroutable()
+    const res = await resolve()
+    expect(res.status).toBe(200)
+  }, 20_000)
+
+  it("[MUST-FAIL] through /resolve: a local row's 30 s bound, present during the forward, does not lift a 5 s peer bound (qa)", async () => {
+    after = 6_000
+    registry.register({ vesselId: "local-producer", vesselName: "local-producer", version: "1", endpoint: "http://local.test",
+      shapes: ["slow_shape"], orgId: "org-test", resolve_timeout_ms: 30_000 } as never)
+    registry.list().filter((v) => v.vesselId === "local-producer").forEach((v) => { v.status = "unhealthy" as never }) // present, not routed to
+    mirror(5_000, "org-test")
+    unroutable()
+    const t0 = Date.now()
+    const res = await resolve()
+    expect(res.status).not.toBe(200)
+    expect(Date.now() - t0).toBeLessThan(5_900)
+  }, 20_000)
 })

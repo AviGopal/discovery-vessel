@@ -384,12 +384,6 @@ export class VesselRegistry {
   }
 
   /**
-   * Rows that mirror another substrate's vessels (`<vessel>@<substrate>`), and how many of them a vessel of this node
-   * could be routed to: a system vessel's, or one whose org is an org this node's own vessels register under. A peer row
-   * that is listed but not reachable (by org, or by health) is what makes a shape look served here while every call to it
-   * 404s. Counts only: no org is named.
-   */
-  /**
    * How long a call forwarded to a peer for this shape may take: the bound the peers' producers advertise, as the rows
    * mirrored here from them carry it (resolve_timeout_ms on a `<vessel>@<substrate>` row, live, healthy or not), of rows
    * the caller could be served by (its org's, or a system row: the /resolve rule), so another org's row cannot make our
@@ -405,6 +399,12 @@ export class VesselRegistry {
     return bounds.length > 0 ? Math.max(...bounds) : undefined
   }
 
+  /**
+   * Rows that mirror another substrate's vessels (`<vessel>@<substrate>`), and how many of them a vessel of this node
+   * could be routed to: a system vessel's, or one whose org is an org this node's own vessels register under. A peer row
+   * that is listed but not reachable (by org, or by health) is what makes a shape look served here while every call to it
+   * 404s. Counts only: no org is named.
+   */
   peerReach(): { peer_rows: number; peer_rows_reachable: number; peer_rows_healthy_reachable: number } {
     const live = [...this.vessels.values()].filter((v) => !this.isExpired(v))
     const peer = (v: VesselRegistration): boolean => v.vesselId.includes("@")
