@@ -26,8 +26,13 @@ function setEnv(env: Partial<Record<(typeof KEYS)[number], string>>) {
   for (const [k, v] of Object.entries(env)) process.env[k] = v
 }
 
-async function bootstrap(): Promise<Record<string, unknown>> {
-  const res = await createServer().request("/bootstrap")
+// The caller: on this host (a loopback socket, no front in between), off it through the TLS front (a loopback socket
+// carrying a forwarded-for), or unknown (an in-process request has no socket).
+type Caller = "local" | "via-front" | "unknown"
+async function bootstrap(caller: Caller = "local"): Promise<Record<string, unknown>> {
+  const env = caller === "unknown" ? undefined : { requestIP: () => ({ address: "127.0.0.1" }) }
+  const headers = caller === "via-front" ? { "x-forwarded-for": "198.51.100.7" } : undefined
+  const res = await createServer().request("/bootstrap", { headers }, env)
   expect(res.status).toBe(200)
   return (await res.json()) as Record<string, unknown>
 }
@@ -40,6 +45,19 @@ afterEach(() => {
 })
 
 describe("GET /bootstrap", () => {
+  it("[MUST-FAIL] a caller off this host is never pointed at a cleartext endpoint; one on this host may be (agf_stblkwnacdn1)", async () => {
+    setEnv({ PUBLIC_IP: "203.0.113.10" })
+    for (const caller of ["via-front", "unknown"] as const) {
+      const b = await bootstrap(caller)
+      expect([caller, b.identity_endpoint, b.discovery_endpoint, b.activity_endpoint]).toEqual([caller, "", "", ""])
+    }
+    expect((await bootstrap("local")).identity_endpoint).toBe("http://203.0.113.10:18101")
+    // an https front is offered to everyone
+    setEnv({ PUBLIC_IP: "203.0.113.10", IDENTITY_PUBLIC_URL: "https://hub.example", DISCOVERY_PUBLIC_URL: "https://hub.example:8443" })
+    const remote = await bootstrap("via-front")
+    expect([remote.identity_endpoint, remote.discovery_endpoint, remote.activity_endpoint]).toEqual(["https://hub.example", "https://hub.example:8443", ""])
+  })
+
   it("advertises the trace store from an explicit public URL (a TLS front)", async () => {
     setEnv({
       PUBLIC_IP: "203.0.113.10",

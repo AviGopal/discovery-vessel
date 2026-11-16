@@ -396,11 +396,21 @@ export function createServer() {
       process.env.ACTIVITY_PUBLIC_URL ??
       (publicIp ? `http://${publicIp}:${process.env.ACTIVITY_PUBLIC_PORT ?? "18080"}` : undefined) ??
       ""
+    // A key is sent to these endpoints, so a caller off this host is never pointed at a cleartext one (agf_stblkwnacdn1:
+    // a remote cockpit followed http://<public ip>:<identity port> and would have sent its key in clear). Off this host
+    // means the connection is not from loopback, or it came through a front (a forwarded-for naming another host: the
+    // hub's TLS front proxies from 127.0.0.1), or its address is unknown. Such a caller gets only https endpoints; an
+    // http one is left out, never offered. A caller on this host (an in-container client) gets them as before.
+    const fwd = (c.req.header("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+    const socket = (c.env as { requestIP?: (r: Request) => { address?: string } | null } | undefined)?.requestIP?.(c.req.raw)?.address ?? ""
+    const loop = (a: string): boolean => a === "::1" || a === "::ffff:127.0.0.1" || a.startsWith("127.")
+    const local = loop(socket) && fwd.every(loop)
+    const safe = (u: string | undefined): string => (u === undefined ? "" : local || u.startsWith("https://") ? u : "")
     return c.json({
       relay_multiaddrs,
-      identity_endpoint,
-      discovery_endpoint,
-      activity_endpoint,
+      identity_endpoint: safe(identity_endpoint),
+      discovery_endpoint: safe(discovery_endpoint),
+      activity_endpoint: safe(activity_endpoint),
       // A client SHOULD reserve a circuit on the relay and dial vessels via their
       // libp2p_multiaddr, falling back to direct HTTP only when no circuit exists.
       prefer_transport: "libp2p",
