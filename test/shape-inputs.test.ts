@@ -69,7 +69,8 @@ describe("declared inputs through registration and the shapeDescriptions read", 
     })
     const declared = await read({ declared: true })
     expect(Object.keys(declared.shape_descriptions)).toEqual(["fs_read"])
-    expect(Object.keys((await read({})).shape_descriptions).sort()).toEqual(["fs_read", "record_write"])
+    // scoped to this leg's shapes: the registry keeps other files' vessels, and their described shapes are not this leg's
+    expect(Object.keys((await read({ shapes: ["fs_read", "record_write"] })).shape_descriptions).sort()).toEqual(["fs_read", "record_write"])
   })
   it("[MUST-FAIL] a shape with declared inputs and no description is still offered", async () => {
     // A shape no other test describes: the registry keeps earlier tests' vessels.
