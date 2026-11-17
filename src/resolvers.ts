@@ -387,6 +387,25 @@ export function sanitizeShapeAnswers(raw: unknown, shapes: unknown): Record<stri
   return Object.keys(out).length ? out : undefined
 }
 
+/**
+ * A registration's shape_changes as discovery keeps them: only for shapes the vessel advertises, each a list of plain
+ * shape names (deduplicated, at most CHANGES_MAX), at most WRITES_MAX shapes. Anything else is dropped; undefined when
+ * nothing is left.
+ */
+export const CHANGES_MAX = 8
+export function sanitizeShapeChanges(raw: unknown, shapes: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Array.isArray(shapes)) return undefined
+  const advertised = new Set(shapes.map(String))
+  const out: Record<string, string[]> = {}
+  for (const [shape, changed] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(out).length >= WRITES_MAX) break
+    if (!advertised.has(shape) || !Array.isArray(changed)) continue
+    const names = [...new Set(changed.filter((c): c is string => typeof c === "string" && SHAPE_NAME.test(c)))].slice(0, CHANGES_MAX)
+    if (names.length > 0) out[shape] = names
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 /** A registration's writes: shape names it does not also serve, at most WRITES_MAX of them. */
 export const WRITES_MAX = 64
 export function sanitizeWrites(raw: unknown, shapes: unknown): string[] | undefined {
@@ -411,10 +430,12 @@ export async function resolveShapeDescriptions(
   const all = registry.getShapeDescriptions(scope)
   const inputs = registry.getShapeInputs(scope)
   const answers = registry.getShapeAnswers(scope)
+  const changes = registry.getShapeChanges(scope)
   const wanted = Array.isArray(pointer.shapes) ? new Set(pointer.shapes.map(String)) : null
   const shape_descriptions: Record<string, string> = {}
   const shape_inputs: Record<string, Record<string, unknown>> = {}
   const shape_answers: Record<string, string> = {}
+  const shape_changes: Record<string, string[]> = {}
   // Every shape that is described OR has declared inputs: a declaration makes a shape fillable whether or not anyone
   // wrote prose for it, so it is offered with an empty description rather than dropped.
   for (const shape of [...new Set([...Object.keys(all), ...Object.keys(inputs)])].sort((a, b) => a.localeCompare(b))) {
@@ -425,6 +446,7 @@ export async function resolveShapeDescriptions(
     shape_descriptions[shape] = text
     if (inputs[shape]) shape_inputs[shape] = inputs[shape]
     if (answers[shape]) shape_answers[shape] = answers[shape]
+    if (changes[shape]) shape_changes[shape] = changes[shape]
   }
   // Written-not-served shapes: data a reader meets in rows, never a call, so `declared` (which narrows what can be
   // called) does not filter them.
@@ -434,7 +456,7 @@ export async function resolveShapeDescriptions(
     if (ADDRESS.test(text)) continue
     data_shapes[shape] = text
   }
-  return { shape_descriptions, shape_inputs, shape_answers, data_shapes }
+  return { shape_descriptions, shape_inputs, shape_answers, shape_changes, data_shapes }
 }
 
 /**

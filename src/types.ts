@@ -168,6 +168,15 @@ export interface VesselRegistration {
   shape_answers?: Record<string, string>
 
   /**
+   * OPTIONAL per-shape changes: the shapes whose state a call of the shape alters, declared by the vessel that owns it
+   * (a view write changes the view a region draws, for instance). Beside shape_answers it tells a call that makes a
+   * change from one that reads it, so a reader can hold the effect of a change to a read made after it rather than to
+   * the changing call's own reply. Kept only for shapes in `shapes`, each a list of plain shape names
+   * (sanitizeShapeChanges).
+   */
+  shape_changes?: Record<string, string[]>
+
+  /**
    * OPTIONAL shapes this vessel WRITES as rows but does not serve (never resolvable through it), each described in
    * shape_descriptions: the walk's hop, selection and failure rows, for instance. They never enter `shapes`, so they
    * reach no capability lookup, routing or callable list; readers get their descriptions as data_shapes in the
@@ -487,6 +496,8 @@ export interface ShapeDescriptionsResult {
   shape_inputs: Record<string, Record<string, unknown>>
   /** Each described shape's declared answer shape, where its producer declared one. */
   shape_answers: Record<string, string>
+  /** Each described shape's declared changes (the shapes a call of it alters), where its producer declared them. */
+  shape_changes: Record<string, string[]>
   /** What the rows of shapes vessels write but do not serve are (not callable; never filtered by `declared`). */
   data_shapes: Record<string, string>
 }
@@ -536,6 +547,8 @@ export interface RegisterRequest {
   shape_inputs?: Record<string, unknown>
   /** OPTIONAL per-shape answer shape (see VesselRegistration.shape_answers). */
   shape_answers?: unknown
+  /** OPTIONAL per-shape changes (see VesselRegistration.shape_changes). */
+  shape_changes?: unknown
   /** OPTIONAL shapes written but not served (see VesselRegistration.writes). */
   writes?: unknown
   protocol?: string
