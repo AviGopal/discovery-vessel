@@ -6,6 +6,14 @@
  */
 
 import type { Context, Next } from "hono"
+import {
+  DEFAULT_CREDENTIAL_TTL_MS,
+  makeCredentialValidator,
+  type ValidationFailure,
+  type ValidationOutcome
+} from "./credential-cache"
+
+export type { ValidationFailure } from "./credential-cache"
 
 // =============================================================================
 // TYPES
@@ -16,23 +24,6 @@ export interface AuthContext {
   userId: string
   keyId: string
   scopes: string[]
-}
-
-/**
- * Response shape from identity-vessel POST /v1/auth/resolve.
- * Mirrors the contract used by activity-api's validateApiKeyWithFallback.
- */
-interface IdentityResolveResponse {
-  success: boolean
-  data?: {
-    authenticated: boolean
-    orgId: string
-    accountId?: string
-    userId: string
-    keyId: string
-    scopes: string[]
-    reason?: string
-  }
 }
 
 /**
@@ -57,14 +48,6 @@ export type IdentityValidator = (apiKey: string) => Promise<AuthContext | null>
  * type, so a test validator swapped in via `setIdentityValidator` keeps its
  * existing `AuthContext | null` contract and simply reports "rejected".
  */
-export type ValidationFailure =
-  /** Identity answered, and said no. The credential itself is bad. */
-  | "rejected"
-  /** Identity answered non-2xx — it is up but erroring. */
-  | "identity_http_error"
-  /** Identity unreachable/timed out, and no cached grace to fall back on. */
-  | "identity_unreachable"
-
 let lastFailure: ValidationFailure = "rejected"
 /** HTTP status behind the most recent `identity_http_error`, for the log line. */
 let identityHttpErrorStatus = 0
@@ -79,12 +62,16 @@ export function lastValidationFailure(): ValidationFailure {
 
 /** A human-readable reason for the 401 log line and response body. */
 export function lastValidationFailureDetail(): string {
-  switch (lastFailure) {
+  return failureDetail(lastFailure, identityHttpErrorStatus)
+}
+
+function failureDetail(failure: ValidationFailure, status: number): string {
+  switch (failure) {
     case "identity_http_error":
-      return `identity returned ${identityHttpErrorStatus}`
+      return `identity returned ${status}`
     case "rejected":
-      return identityHttpErrorStatus === 401 || identityHttpErrorStatus === 403
-        ? `identity rejected the key (HTTP ${identityHttpErrorStatus})`
+      return status === 401 || status === 403
+        ? `identity rejected the key (HTTP ${status})`
         : "identity rejected the key"
     case "identity_unreachable":
       return "identity unreachable and no cached validation within the grace window"
@@ -147,105 +134,55 @@ function identityVesselUrl(): string | null {
   return process.env.IDENTITY_VESSEL_URL || null
 }
 
-// Short-TTL validation cache: discovery sits on every vessel's register/
-// heartbeat path, so a fresh HTTP validation per request turns identity-vessel
-// latency into fleet-wide 401 churn (timeouts read as revoked keys). A
-// recently-validated key stays valid for the TTL without a round-trip; when
-// identity is slow or unreachable a previously-valid key is served from cache
-// for a bounded grace window (graceful degradation for KNOWN keys — unknown
-// keys still fail closed, and a definitive rejection evicts the cache entry).
-const VALIDATION_TTL_MS = 60_000
-const VALIDATION_GRACE_MS = 600_000
-const validationCache = new Map<string, { ctx: AuthContext; at: number }>()
+// Short-TTL validation cache (credential-cache.ts): discovery sits on every
+// vessel's register/heartbeat path, so a fresh HTTP validation per request turns
+// identity-vessel latency into fleet-wide 401 churn (timeouts read as revoked
+// keys). A recently-validated key stays valid for the TTL without a round-trip;
+// when identity is slow or unreachable a previously-valid key is served from
+// cache for a bounded grace window (graceful degradation for KNOWN keys:
+// unknown keys still fail, and a definitive refusal evicts the entry).
+
+// The TTL is the parent's constant, 60 s (DEFAULT_CREDENTIAL_TTL_MS). It stays a
+// constant until someone needs to change it.
+let clock: () => number = () => Date.now()
+
+const credentials = makeCredentialValidator<AuthContext>({
+  identityUrl: identityVesselUrl,
+  ttlMs: DEFAULT_CREDENTIAL_TTL_MS,
+  clock: () => clock(),
+  principal: (d) => ({ orgId: d.orgId, userId: d.userId, keyId: d.keyId, scopes: d.scopes })
+})
+
+/** Tests only: replace the clock the cache ages by (null restores Date.now). */
+export function __setAuthClockForTests(fn: (() => number) | null): void {
+  clock = fn ?? (() => Date.now())
+}
+/** Tests only: a fresh process (no cached validation). */
+export function __resetAuthStateForTests(): void {
+  credentials.clear()
+}
+/** Tests only: how many validations are cached. */
+export function __credentialCacheSizeForTests(): number {
+  return credentials.size()
+}
+
+/** One validation with its outcome, recording it on the module-level side channel too. */
+async function validateWithOutcome(apiKey: string): Promise<ValidationOutcome<AuthContext>> {
+  const outcome = await credentials.validate(apiKey)
+  if (!outcome.ctx) {
+    lastFailure = outcome.failure
+    identityHttpErrorStatus = outcome.status
+  }
+  return outcome
+}
 
 /**
- * Default identity validator — calls identity-vessel POST /v1/auth/resolve.
- *
- * Uses the same endpoint and request shape as activity-api's
- * validateApiKeyWithFallback (the canonical reference implementation).
- * The old /v1/keys/validate path rejects mb-{b64}-{hmac} format keys that
- * /v1/auth/resolve accepts correctly.
+ * Default identity validator: identity-vessel POST /v1/auth/resolve through
+ * the cache (credential-cache.ts), the same endpoint and request shape as
+ * activity-api's validateApiKeyWithFallback.
  */
 async function defaultIdentityValidator(apiKey: string): Promise<AuthContext | null> {
-  const now = Date.now()
-  const cached = validationCache.get(apiKey)
-  if (cached && now - cached.at < VALIDATION_TTL_MS) {
-    return cached.ctx
-  }
-  try {
-    const base = identityVesselUrl()
-    if (!base) throw new Error("IDENTITY_VESSEL_URL is not configured")
-    const res = await fetch(`${base}/v1/auth/resolve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        impulse: {
-          type: "authentication",
-          pointer: {
-            type: "apiKey",
-            apiKey
-          }
-        }
-      }),
-      signal: AbortSignal.timeout(10000)
-    })
-
-    if (!res.ok) {
-      // A 401/403 from identity is a REJECTION expressed as a status code.
-      // Measured against the live hub: identity answers a bad key with HTTP
-      // 401, not 200 + authenticated:false, so classifying purely on `!res.ok`
-      // would report the fleet's most common real rejection as a generic
-      // "identity_http_error" — accurate but misleading at exactly the moment
-      // an operator is deciding whether to reissue a credential.
-      lastFailure = res.status === 401 || res.status === 403 ? "rejected" : "identity_http_error"
-      identityHttpErrorStatus = res.status
-      // A 5xx is identity FAULTING; a 4xx is identity DECIDING. Only the
-      // former may be served from grace.
-      //
-      // ★ The grace window must never outlive a revocation. `!res.ok` also
-      // covers 401/403 — identity's way of saying this key is revoked — and
-      // serving those from cache would keep a withdrawn credential working
-      // for the full 10-minute window. That is a strictly worse failure than
-      // the churn grace exists to prevent, so 4xx evicts exactly as before.
-      if (res.status >= 500) {
-        if (cached && now - cached.at < VALIDATION_GRACE_MS) {
-          return cached.ctx
-        }
-        return null
-      }
-      validationCache.delete(apiKey)
-      return null
-    }
-
-    const data = (await res.json()) as IdentityResolveResponse
-    if (!data.success || !data.data?.authenticated) {
-      // A definitive answer from identity: this key really is bad. Evict.
-      // Clear the status too — it is module-level and would otherwise report a
-      // PREVIOUS call's HTTP code alongside this call's reason.
-      lastFailure = "rejected"
-      identityHttpErrorStatus = 0
-      validationCache.delete(apiKey)
-      return null
-    }
-
-    const ctx: AuthContext = {
-      orgId: data.data.orgId,
-      userId: data.data.userId,
-      keyId: data.data.keyId,
-      scopes: data.data.scopes
-    }
-    validationCache.set(apiKey, { ctx, at: now })
-    return ctx
-  } catch {
-    // Identity slow/unreachable — serve a known-good key within the grace
-    // window rather than churning the registry; unknown keys fail closed.
-    lastFailure = "identity_unreachable"
-    identityHttpErrorStatus = 0
-    if (cached && now - cached.at < VALIDATION_GRACE_MS) {
-      return cached.ctx
-    }
-    return null
-  }
+  return (await validateWithOutcome(apiKey)).ctx
 }
 
 let _identityValidator: IdentityValidator = defaultIdentityValidator
@@ -340,7 +277,16 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
   }
 
   const apiKey = match[1].trim()
-  const authCtx = await _identityValidator(apiKey)
+  // The default validator's outcome is read per call: the module-level side
+  // channel can be overwritten by a concurrent request before it is read here.
+  let outcome: ValidationOutcome<AuthContext>
+  if (_identityValidator === defaultIdentityValidator) {
+    outcome = await validateWithOutcome(apiKey)
+  } else {
+    const ctx = await _identityValidator(apiKey)
+    outcome = { ctx, failure: "rejected", status: 0 }
+  }
+  const authCtx = outcome.ctx
 
   if (!authCtx) {
     // ★ LOG WHY. Discovery sits on every vessel's register/heartbeat path, so
@@ -350,8 +296,8 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
     // The registry TTL is 5 minutes, so a sustained 401 silently empties the
     // registry; the reason is what tells an operator whether to reissue a
     // credential or repair a network path.
-    const failure = lastValidationFailure()
-    const detail = lastValidationFailureDetail()
+    const failure = outcome.failure
+    const detail = failureDetail(outcome.failure, outcome.status)
     console.warn(
       `[discovery] 401 ${c.req.method} ${normalisedPath} — ${failure}: ${detail} (identity=${identityVesselUrl() ?? "unset"})`
     )
