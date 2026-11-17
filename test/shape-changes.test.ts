@@ -10,7 +10,7 @@ const TMP = mkdtempSync(join(tmpdir(), "shape-changes-"))
 const savedPath = process.env.DISCOVERY_LEARNED_DESCRIPTIONS_PATH
 process.env.DISCOVERY_LEARNED_DESCRIPTIONS_PATH = join(TMP, "learned.json")
 const { createServer, registry } = await import("../src/index")
-const { resolve, sanitizeShapeChanges, CHANGES_MAX } = await import("../src/resolvers")
+const { resolve, sanitizeShapeChanges, CHANGES_MAX, WRITES_MAX } = await import("../src/resolvers")
 import { setIdentityValidator } from "../src/middleware/auth"
 import type { Hono } from "hono"
 
@@ -41,6 +41,11 @@ describe("sanitizeShapeChanges", () => {
       view_write: ["viewState", "viewState", "a b", 3, "http://x"], not_mine: ["x"], empty: [], one: "viewState", wide: many,
     }, ["view_write", "empty", "one", "wide"])).toEqual({ view_write: ["viewState"], wide: many.slice(0, CHANGES_MAX) })
   })
+  it("[MUST-FAIL] keeps at most WRITES_MAX shapes from one registration", () => {
+    const shapes = Array.from({ length: WRITES_MAX + 1 }, (_, i) => `sc_w${i}`)
+    const kept = sanitizeShapeChanges(Object.fromEntries(shapes.map((s) => [s, ["scX"]])), shapes)
+    expect(Object.keys(kept ?? {})).toHaveLength(WRITES_MAX)
+  })
   it("is undefined for no declaration, or shapes that are not a list", () => {
     expect(sanitizeShapeChanges(undefined, ["view_write"])).toBeUndefined()
     expect(sanitizeShapeChanges({ view_write: ["viewState"] }, "view_write")).toBeUndefined()
@@ -70,5 +75,30 @@ describe("declared changes through registration, the shapeDescriptions read and 
   it("a vessel that declares none adds none, and the read always carries the key (a guard)", async () => {
     await register({ vesselId: "v-sc-plain", endpoint: "http://v-sc-plain.test", systemVessel: true, shapes: ["sc_plain_read"], shape_descriptions: { sc_plain_read: "Reads." } })
     expect((await read({ shapes: ["sc_plain_read"] })).shape_changes).toEqual({})
+  })
+})
+
+describe("which vessels' declared changes the registry serves", () => {
+  // Registered straight into the registry, as its own tests do, with this file's own vessels and shapes.
+  const reg = (vesselId: string, shape: string, changed: string[], more: Record<string, unknown> = {}) =>
+    registry.register({ vesselId, vesselName: vesselId, version: "1", endpoint: `http://${vesselId}.test`, shapes: [shape],
+      shape_changes: { [shape]: changed }, ...more } as never)
+  it("[MUST-FAIL] an expired vessel's changes are not served", () => {
+    const v = reg("v-sc-expired", "sc_expired_write", ["scX"], { systemVessel: true })
+    expect(registry.getShapeChanges().sc_expired_write).toEqual(["scX"])
+    v.expiresAt = Date.now() - 1
+    expect(registry.getShapeChanges().sc_expired_write).toBeUndefined()
+  })
+  it("[MUST-FAIL] a read scoped to one org is not told another org's vessel's changes; a system vessel's, any org's", () => {
+    reg("v-sc-org-b", "sc_org_b_write", ["scX"], { orgId: "org-sc-b" })
+    reg("v-sc-system", "sc_system_write", ["scX"], { systemVessel: true })
+    const a = registry.getShapeChanges({ orgIds: ["org-sc-a"] })
+    expect([a.sc_org_b_write, a.sc_system_write]).toEqual([undefined, ["scX"]])
+    expect(registry.getShapeChanges({ orgIds: ["org-sc-b"] }).sc_org_b_write).toEqual(["scX"])
+  })
+  it("[MUST-FAIL] when two vessels declare one shape, the first registered is served", () => {
+    reg("v-sc-first", "sc_dup_write", ["scFirst"], { systemVessel: true })
+    reg("v-sc-second", "sc_dup_write", ["scSecond"], { systemVessel: true })
+    expect(registry.getShapeChanges().sc_dup_write).toEqual(["scFirst"])
   })
 })
