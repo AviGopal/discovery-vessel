@@ -17,7 +17,6 @@ import type { Hono } from "hono"
 const SYS = "organizations:system-fixture"
 const realFetch = globalThis.fetch
 let app: Hono
-const INPUT = { type: "object", properties: { cwd: { type: "string" } } }
 const register = (body: Record<string, unknown>) =>
   app.request("/register", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "ApiKey sys-caller" }, body: JSON.stringify(body) })
 const read = async (pointer: Record<string, unknown>) =>
@@ -49,23 +48,27 @@ describe("sanitizeShapeChanges", () => {
 })
 
 describe("declared changes through registration, the shapeDescriptions read and the registry endpoint", () => {
+  // The registry keeps earlier tests' vessels (one process runs every file): these shapes are this file's own, declare no
+  // inputs (so a declared-only read elsewhere never sees them), and every read and check is scoped to them.
+  const MINE = ["sc_view_write", "sc_view_read"]
+  const only = <T,>(m: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(m).filter(([k]) => MINE.includes(k)))
   it("[MUST-FAIL] a call that changes a shape and one that reads it are told apart: changes beside answers, only for what it serves", async () => {
     await register({
-      vesselId: "v-view", endpoint: "http://v-view.test", systemVessel: true, shapes: ["view_write", "view_read"],
-      shape_descriptions: { view_write: "Writes a view.", view_read: "Reads the view in force." },
-      shape_inputs: { view_write: INPUT, view_read: INPUT },
-      shape_answers: { view_read: "viewState" },
-      shape_changes: { view_write: ["viewState"], stray: ["viewState"] },
+      vesselId: "v-sc-view", endpoint: "http://v-sc-view.test", systemVessel: true, shapes: MINE,
+      shape_descriptions: { sc_view_write: "Writes a view.", sc_view_read: "Reads the view in force." },
+      shape_answers: { sc_view_read: "scViewState" },
+      shape_changes: { sc_view_write: ["scViewState"], stray: ["scViewState"] },
     })
-    const all = await read({})
-    expect(all.shape_changes).toEqual({ view_write: ["viewState"] })
-    expect(all.shape_answers).toEqual({ view_read: "viewState" })
-    expect((await read({ shapes: ["view_read"] })).shape_changes).toEqual({})
+    const mine = await read({ shapes: MINE })
+    expect(mine.shape_changes).toEqual({ sc_view_write: ["scViewState"] })
+    expect(mine.shape_answers).toEqual({ sc_view_read: "scViewState" })
+    expect(only((await read({})).shape_changes)).toEqual({ sc_view_write: ["scViewState"] })
+    expect((await read({ shapes: ["sc_view_read"] })).shape_changes).toEqual({})
     const http = (await (await app.request("/registry/shape-descriptions", { headers: { Authorization: "ApiKey sys-caller" } })).json()) as { shape_changes: Record<string, string[]> }
-    expect(http.shape_changes).toEqual({ view_write: ["viewState"] })
+    expect(only(http.shape_changes)).toEqual({ sc_view_write: ["scViewState"] })
   })
   it("a vessel that declares none adds none, and the read always carries the key (a guard)", async () => {
-    await register({ vesselId: "v-plain", endpoint: "http://v-plain.test", systemVessel: true, shapes: ["fs_read"], shape_descriptions: { fs_read: "Reads." } })
-    expect((await read({ shapes: ["fs_read"] })).shape_changes).toEqual({})
+    await register({ vesselId: "v-sc-plain", endpoint: "http://v-sc-plain.test", systemVessel: true, shapes: ["sc_plain_read"], shape_descriptions: { sc_plain_read: "Reads." } })
+    expect((await read({ shapes: ["sc_plain_read"] })).shape_changes).toEqual({})
   })
 })
