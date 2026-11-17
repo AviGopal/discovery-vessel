@@ -4,8 +4,9 @@
  * API-key validation posts the presented key to identity and trusts the
  * answer, so the destination of that request is part of the trust boundary.
  * When IDENTITY_VESSEL_URL is unset or empty there is no configured identity,
- * and validation must fail closed (reason `identity_unreachable`) without any
- * outbound request. When it is configured, behaviour is unchanged.
+ * and validation must fail closed without any outbound request: a 500 with
+ * reason `identity_unconfigured` (a misconfiguration, neither a refusal nor a
+ * fault to retry). When it is configured, behaviour is unchanged.
  *
  * `fetch` is replaced by a recorder for every test, so nothing here touches
  * the network. The recorder answers "authenticated" for the valid key wherever
@@ -96,9 +97,9 @@ describe("identity endpoint not configured", () => {
     const res = await attempt(validKey())
 
     expect(calls.map((c) => c.url)).toEqual([])
-    expect(res.status).toBe(401)
+    expect(res.status).toBe(500)
     const body = (await res.json()) as { error: { reason: string } }
-    expect(body.error.reason).toBe("identity_unreachable")
+    expect(body.error.reason).toBe("identity_unconfigured")
   })
 
   it("empty string: makes no outbound request and refuses the key", async () => {
@@ -107,9 +108,9 @@ describe("identity endpoint not configured", () => {
     const res = await attempt(validKey())
 
     expect(calls.map((c) => c.url)).toEqual([])
-    expect(res.status).toBe(401)
+    expect(res.status).toBe(500)
     const body = (await res.json()) as { error: { reason: string } }
-    expect(body.error.reason).toBe("identity_unreachable")
+    expect(body.error.reason).toBe("identity_unconfigured")
   })
 })
 

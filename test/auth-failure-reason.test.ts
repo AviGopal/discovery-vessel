@@ -96,7 +96,7 @@ describe("401 carries the reason", () => {
       }
 
       const res = await attempt(freshKey())
-      expect(res.status).toBe(401)
+      expect(res.status).toBe(503)
       const body = (await res.json()) as { error: { reason: string } }
       // ★ THE POINT: this must NOT be "rejected". A network fault and a revoked
       // credential demand opposite responses, and collapsing them is the defect.
@@ -125,7 +125,7 @@ describe("401 carries the reason", () => {
     identityHandler = () => new Response("boom", { status: 503 })
 
     const res = await attempt(freshKey())
-    expect(res.status).toBe(401)
+    expect(res.status).toBe(503)
     const body = (await res.json()) as { error: { reason: string; detail: string } }
     expect(body.error.reason).toBe("identity_http_error")
     expect(body.error.detail).toContain("503")
@@ -166,7 +166,7 @@ describe("401 carries the reason", () => {
       return new Response("too late")
     }
     const after = await attempt(revoked)
-    expect(after.status).toBe(401)
+    expect(after.status).toBe(503)
     const body = (await after.json()) as { error: { reason: string } }
     expect(body.error.reason).toBe("identity_unreachable")
   }, 30_000)

@@ -75,6 +75,8 @@ function failureDetail(failure: ValidationFailure, status: number): string {
         : "identity rejected the key"
     case "identity_unreachable":
       return "identity unreachable and no cached validation within the grace window"
+    case "identity_unconfigured":
+      return "identity URL unset: misconfiguration"
     default:
       return "identity rejected the key"
   }
@@ -130,7 +132,7 @@ export const PUBLIC_PATH_PREFIXES: readonly string[] = [
 function identityVesselUrl(): string | null {
   // No built-in fallback: the presented key is sent wherever this points and
   // the answer is trusted, so an unconfigured endpoint means no validation at
-  // all (fail closed via the unreachable path), never a default host.
+  // all (fail closed: a 500 IDENTITY_UNCONFIGURED, no request made), never a default host.
   return process.env.IDENTITY_VESSEL_URL || null
 }
 
@@ -232,12 +234,23 @@ export function getAuthContextOptional(c: Context): AuthContext | undefined {
 // =============================================================================
 
 /**
+ * Whether a failed validation is identity failing to decide (503) rather than
+ * identity refusing the key (401): a 5xx or no answer. A 401/403, a 200 saying
+ * not authenticated, and any other 4xx (429 and 408 included) stay refusals.
+ */
+function identityCouldNotDecide(outcome: ValidationOutcome<AuthContext>): boolean {
+  if (outcome.failure === "identity_unreachable") return true
+  return outcome.failure === "identity_http_error" && outcome.status >= 500
+}
+
+/**
  * Hono middleware that enforces API-key authentication on mutation endpoints.
  *
  * - Public paths (GET read-only endpoints) pass through without a token.
  * - All other paths require `Authorization: ApiKey <key>`.
  * - On success the resolved AuthContext is stored in `c.set("auth", ...)`.
- * - On failure a 401 JSON response is returned.
+ * - A refused key is a 401 JSON response; identity unable to decide (and no
+ *   grace for the key) is a retryable 503; no identity configured is a 500.
  */
 export async function authMiddleware(c: Context, next: Next): Promise<Response | void> {
   const path = new URL(c.req.url).pathname
@@ -287,6 +300,50 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
     outcome = { ctx, failure: "rejected", status: 0 }
   }
   const authCtx = outcome.ctx
+
+  if (!authCtx && outcome.failure === "identity_unconfigured") {
+    // No identity is configured. That is neither a verdict on the key (401)
+    // nor a passing fault to retry (503): it is this node's misconfiguration,
+    // and it stays until someone sets the identity endpoint.
+    const detail = failureDetail(outcome.failure, outcome.status)
+    console.error(`[discovery] 500 ${c.req.method} ${normalisedPath} — identity_unconfigured: ${detail}`)
+    return c.json(
+      {
+        error: {
+          code: "IDENTITY_UNCONFIGURED",
+          message: "this discovery has no identity endpoint configured",
+          reason: outcome.failure,
+          detail
+        }
+      },
+      500
+    )
+  }
+
+  if (!authCtx && identityCouldNotDecide(outcome)) {
+    // Identity is erroring or unreachable, and this key has no grace. That is
+    // no verdict on the key: answer a retryable 503, never a 401, so a caller
+    // that exits on a 401 does not restart over identity's state.
+    // (ias-executor-ts's vessel daemon draws the same line: refused is 401,
+    // identity unavailable is 503.)
+    const detail = failureDetail(outcome.failure, outcome.status)
+    console.warn(
+      `[discovery] 503 ${c.req.method} ${normalisedPath} — ${outcome.failure}: ${detail} (identity=${identityVesselUrl() ?? "unset"})`
+    )
+    const retryAfter = outcome.retryAfter?.trim()
+    if (retryAfter && /^\d+$/.test(retryAfter)) c.header("Retry-After", retryAfter)
+    return c.json(
+      {
+        error: {
+          code: "IDENTITY_UNAVAILABLE",
+          message: "identity could not validate the key right now; retry",
+          reason: outcome.failure,
+          detail
+        }
+      },
+      503
+    )
+  }
 
   if (!authCtx) {
     // ★ LOG WHY. Discovery sits on every vessel's register/heartbeat path, so

@@ -37,8 +37,10 @@ export type ValidationFailure =
   | "rejected"
   /** Identity answered non-2xx: it is up but erroring. */
   | "identity_http_error"
-  /** Identity unreachable/timed out, or not configured, and no cached grace to fall back on. */
+  /** Identity unreachable/timed out, and no cached grace to fall back on. */
   | "identity_unreachable"
+  /** No identity is configured: a misconfiguration, not a fault and not a refusal. No request is made. */
+  | "identity_unconfigured"
 
 /** One check's result, carried per call so a concurrent check cannot change what this one answers. */
 export interface ValidationOutcome<T> {
@@ -47,6 +49,8 @@ export interface ValidationOutcome<T> {
   failure: ValidationFailure
   /** Identity's HTTP status behind the failure (0 when it did not answer). */
   status: number
+  /** Identity's own Retry-After on a 5xx, for the caller to pass on. */
+  retryAfter?: string
 }
 
 /** What identity's /v1/auth/resolve answers. */
@@ -127,7 +131,7 @@ export function makeCredentialValidator<T>(opts: CredentialValidatorOptions<T>):
       return { ctx: cached.ctx, failure: "rejected", status: 0 }
     }
     try {
-      if (!base || !key) throw new Error("IDENTITY_VESSEL_URL is not configured")
+      if (!base || !key) return { ctx: null, failure: "identity_unconfigured", status: 0 }
       const res = await fetch(`${base}/v1/auth/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -146,7 +150,8 @@ export function makeCredentialValidator<T>(opts: CredentialValidatorOptions<T>):
         // A 5xx is identity FAULTING; a known key is served from grace.
         if (res.status >= 500) {
           if (inGrace) return { ctx: cached!.ctx, failure: "identity_http_error", status: res.status }
-          return { ctx: null, failure: "identity_http_error", status: res.status }
+          const retryAfter = res.headers.get("Retry-After") ?? undefined
+          return { ctx: null, failure: "identity_http_error", status: res.status, retryAfter }
         }
         // Any other 4xx is identity DECIDING: evict. That includes 429 and 408,
         // as on the parent: a rate limit or timeout from identity refuses.
