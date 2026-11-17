@@ -79,10 +79,15 @@ describe("declared changes through registration, the shapeDescriptions read and 
 })
 
 describe("which vessels' declared changes the registry serves", () => {
-  // Registered straight into the registry, as its own tests do, with this file's own vessels and shapes.
-  const reg = (vesselId: string, shape: string, changed: string[], more: Record<string, unknown> = {}) =>
-    registry.register({ vesselId, vesselName: vesselId, version: "1", endpoint: `http://${vesselId}.test`, shapes: [shape],
+  // Registered straight into the registry, as its own tests do, with this file's own vessels and shapes, and unregistered
+  // after each leg: the registry is one for every file, and another file counts what it holds (load: pruneExpired).
+  const mine: string[] = []
+  const reg = (vesselId: string, shape: string, changed: string[], more: Record<string, unknown> = {}) => {
+    mine.push(vesselId)
+    return registry.register({ vesselId, vesselName: vesselId, version: "1", endpoint: `http://${vesselId}.test`, shapes: [shape],
       shape_changes: { [shape]: changed }, ...more } as never)
+  }
+  afterEach(() => { for (const id of mine.splice(0)) registry.unregister(id) })
   it("[MUST-FAIL] an expired vessel's changes are not served", () => {
     const v = reg("v-sc-expired", "sc_expired_write", ["scX"], { systemVessel: true })
     expect(registry.getShapeChanges().sc_expired_write).toEqual(["scX"])
