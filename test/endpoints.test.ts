@@ -522,7 +522,9 @@ describe("Discovery Vessel Endpoints", () => {
         "vesselEndpoint",
         "vesselHealth",
         "vesselRegistry",
-        "shapeDescriptions"
+        "shapeDescriptions",
+        "vesselList",
+        "shapeProducers"
       ])
       expect(data.vessel).toBe("discovery")
       expect(data.version).toBeDefined()

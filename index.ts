@@ -6,6 +6,7 @@
  */
 
 import { createServer, registry, getResolvableShapes } from "./src/index"
+import { keepSelfRegistered } from "./src/self"
 
 const PORT = parseInt(process.env.DISCOVERY_PORT ?? process.env.PORT ?? "8080", 10)
 const HOST = process.env.DISCOVERY_HOST ?? "0.0.0.0"
@@ -20,25 +21,12 @@ async function shutdown(signal: string) {
 process.on("SIGINT", () => shutdown("SIGINT"))
 process.on("SIGTERM", () => shutdown("SIGTERM"))
 
-// Self-register as a vessel
+// Self-register as a vessel, and keep the row fresh (src/self.ts)
 async function selfRegister() {
   const endpoint = process.env.DISCOVERY_SELF_ENDPOINT ??
     `http://localhost:${PORT}`
 
-  registry.register({
-    vesselId: process.env.DISCOVERY_VESSEL_ID ?? "discovery-vessel",
-    vesselName: "Discovery Vessel",
-    version: "0.1.0",
-    endpoint,
-    shapes: getResolvableShapes(),
-    protocol: "http",
-    // Discovery-vessel is shared infrastructure accessible to all tenants.
-    systemVessel: true,
-    metadata: {
-      environment: process.env.KUBERNETES_SERVICE_HOST ? "k8s-cluster" : "local",
-      selfRegistered: true
-    }
-  })
+  keepSelfRegistered(process.env.DISCOVERY_VESSEL_ID ?? "discovery-vessel", endpoint)
 
   console.log(`[discovery-vessel] Self-registered with shapes: ${getResolvableShapes().join(", ")}`)
 }

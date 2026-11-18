@@ -22,7 +22,13 @@ import type {
   ResolverTier,
   ResolverResult,
   ShapeDescriptionsPointer,
-  ShapeDescriptionsResult
+  ShapeDescriptionsResult,
+  PlacementFreeVessel,
+  ShapeProducersPointer,
+  ShapeProducersResult,
+  VesselListPointer,
+  VesselListResult,
+  VesselRegistration
 } from "./types"
 
 /**
@@ -459,6 +465,36 @@ export async function resolveShapeDescriptions(
   return { shape_descriptions, shape_inputs, shape_answers, shape_changes, data_shapes }
 }
 
+// THE SHAPES A PRODUCER CALLS TO REASON ABOUT THE FLEET. vesselList and shapeProducers say what runs and what serves a
+// shape, never where anything runs: a producer that reads a placement never learns one (law 11, the rule that keeps
+// addresses out of shapeDescriptions). Every answer of theirs is built from placementFree alone, whoever asks, so no
+// placement field can reach one; vesselRegistry and vesselCapability keep their placements for the vessels that dial.
+export const placementFree = (v: VesselRegistration): PlacementFreeVessel =>
+  ({ vesselId: v.vesselId, shapes: [...v.shapes], status: v.status ?? "unknown" })
+
+// Only the vessels the caller's orgs may reach (its own, and every system vessel), as shapeDescriptions offers only theirs:
+// a tenant is never shown another's vessels or counted with them. No org named (a caller the identity check gave none),
+// every vessel, as before.
+const reachable = (rows: (orgId?: string) => VesselRegistration[], orgIds?: string[]): VesselRegistration[] => {
+  if (!orgIds?.length) return rows()
+  const seen = new Map<string, VesselRegistration>()
+  for (const orgId of orgIds) for (const v of rows(orgId)) seen.set(v.vesselId, v)
+  return [...seen.values()]
+}
+
+// The list vesselRegistry reads, scoped as above, so its totalCount is the count a reader with the same scope sees there.
+export async function resolveVesselList(_pointer: VesselListPointer, options?: { orgIds?: string[] }): Promise<VesselListResult> {
+  const vessels = reachable((orgId) => registry.list(orgId ? { orgId } : undefined), options?.orgIds)
+  return { vessels: vessels.map(placementFree), totalCount: vessels.length }
+}
+
+// The vessels vesselCapability finds for the shape, scoped as above, healthy ones first, by id.
+export async function resolveShapeProducers(pointer: ShapeProducersPointer, options?: { orgIds?: string[] }): Promise<ShapeProducersResult> {
+  const found = reachable((orgId) => registry.findByShape(pointer.shape, orgId ? { orgId } : undefined), options?.orgIds).map(placementFree)
+  const healthy = (v: PlacementFreeVessel): number => (v.status === "healthy" ? 0 : 1)
+  return { shape: pointer.shape, vesselIds: [...found].sort((a, b) => healthy(a) - healthy(b)).map((v) => v.vesselId) }
+}
+
 /**
  * Main resolver dispatch
  * Routes pointer to appropriate resolver based on type
@@ -491,6 +527,14 @@ export async function resolve(pointer: DiscoveryPointer, options?: { orgIds?: st
         result = await resolveShapeDescriptions(pointer, options)
         break
 
+      case "vesselList":
+        result = await resolveVesselList(pointer, options)
+        break
+
+      case "shapeProducers":
+        result = await resolveShapeProducers(pointer, options)
+        break
+
       default:
         success = false
         throw new Error(`Unknown discovery pointer type: ${(pointer as { type: string }).type}`)
@@ -510,5 +554,5 @@ export async function resolve(pointer: DiscoveryPointer, options?: { orgIds?: st
  * Get shapes this vessel can resolve
  */
 export function getResolvableShapes(): string[] {
-  return ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry", "shapeDescriptions"]
+  return ["vesselCapability", "vesselEndpoint", "vesselHealth", "vesselRegistry", "shapeDescriptions", "vesselList", "shapeProducers"]
 }

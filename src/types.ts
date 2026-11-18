@@ -364,6 +364,21 @@ export interface ShapeDescriptionsPointer {
 }
 
 /**
+ * vesselList - every registered vessel, by id, shapes and status only: what runs, never where (no placement field)
+ */
+export interface VesselListPointer {
+  type: "vesselList"
+}
+
+/**
+ * shapeProducers - the ids of the vessels serving one shape, healthy first: whether anything serves it, never where
+ */
+export interface ShapeProducersPointer {
+  type: "shapeProducers"
+  shape: string
+}
+
+/**
  * Union of all discovery pointer types
  */
 export type DiscoveryPointer =
@@ -372,6 +387,8 @@ export type DiscoveryPointer =
   | VesselHealthPointer
   | VesselRegistryPointer
   | ShapeDescriptionsPointer
+  | VesselListPointer
+  | ShapeProducersPointer
 
 // =============================================================================
 // RESOLUTION RESULTS
@@ -502,12 +519,31 @@ export interface ShapeDescriptionsResult {
   data_shapes: Record<string, string>
 }
 
+/** A vessel as a producer reasons over it: what it is and serves, never where it runs. */
+export interface PlacementFreeVessel {
+  vesselId: string
+  shapes: string[]
+  status: string
+}
+
+export interface VesselListResult {
+  vessels: PlacementFreeVessel[]
+  totalCount: number
+}
+
+export interface ShapeProducersResult {
+  shape: string
+  vesselIds: string[]
+}
+
 export type ResolverResult =
   | VesselCapabilityResult
   | VesselEndpointResult
   | VesselHealthResult
   | VesselRegistryResult
   | ShapeDescriptionsResult
+  | VesselListResult
+  | ShapeProducersResult
 
 // =============================================================================
 // API TYPES
