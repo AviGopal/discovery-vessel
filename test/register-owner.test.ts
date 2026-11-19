@@ -36,7 +36,9 @@ const endpointOf = (id: string) => registry.get(id)?.endpoint
 beforeEach(() => {
   process.env.METABOB_API_KEY = OWN
   __resetSystemOrgForTests()
-  setIdentityValidator(async (key: string) => (key in KEYS ? { orgId: KEYS[key], userId: "u", keyId: `kid-${key}`, scopes: [] } : null))
+  // "no-org-field" validates with no orgId at all (absent, not empty), so a fallback to the body's org would fill it.
+  setIdentityValidator(async (key: string) => key === "no-org-field" ? { userId: "u", keyId: "kid-no-org-field", scopes: [] }
+    : key in KEYS ? { orgId: KEYS[key], userId: "u", keyId: `kid-${key}`, scopes: [] } : null)
   globalThis.fetch = (async (u: unknown) => { throw new TypeError(`unexpected network call in test: ${String(u)}`) }) as typeof fetch
   warned = []
   console.warn = (...a: unknown[]) => { warned.push(a.map(String).join(" ")) }
@@ -125,6 +127,32 @@ describe("who may evict a row through peer dedup", () => {
     expect((await register("tenant-a", "pz", "http://a.test:8000", { libp2p_peer_id: "peer-z" })).status).toBe(201)
     expect((await register("sys-caller", "pz@sid", "http://s.test:8000", { libp2p_peer_id: "peer-z" })).status).toBe(201)
     expect(registry.get("pz")).toBeUndefined()
+  })
+
+  it("an incoming row older than another org's duplicate is still the one evicted: the owner rule never keeps the loser", async () => {
+    expect((await register("tenant-a", "pk", "http://a.test:8000", { libp2p_peer_id: "peer-k" })).status).toBe(201)
+    ;(registry.get("pk") as unknown as Record<string, unknown>).lastSeen = Date.now() + 60_000
+    expect((await register("tenant-b", "pk@b", "http://b.test:8000", { libp2p_peer_id: "peer-k" })).status).toBe(201)
+    expect(registry.get("pk@b")).toBeUndefined()
+    expect(endpointOf("pk")).toBe("http://a.test:8000")
+  })
+
+  it("[MUST-FAIL] with two duplicates, another org's is kept and the writer's own stale one is still evicted", async () => {
+    expect((await register("tenant-b", "pm", "http://b.test:8000", { libp2p_peer_id: "peer-m" })).status).toBe(201)
+    expect((await register("tenant-a", "pm@old", "http://a-old.test:8000", { libp2p_peer_id: "peer-m" })).status).toBe(201)
+    expect((await register("tenant-a", "pm@new", "http://a-new.test:8000", { libp2p_peer_id: "peer-m" })).status).toBe(201)
+    expect(endpointOf("pm")).toBe("http://b.test:8000")
+    expect(registry.get("pm@old")).toBeUndefined()
+    expect(endpointOf("pm@new")).toBe("http://a-new.test:8000")
+  })
+})
+
+describe("whose org decides", () => {
+  it("[MUST-FAIL] the caller's validated org decides, never the body's: a caller with no org naming the row's org in the body is refused", async () => {
+    expect((await register("tenant-a", "ro-body", "http://a.test:8000")).status).toBe(201)
+    expect((await register("no-org", "ro-body", "http://n.test:8000", { orgId: ORG_A })).status).toBe(403)
+    expect((await register("no-org-field", "ro-body", "http://n2.test:8000", { orgId: ORG_A })).status).toBe(403)
+    expect(endpointOf("ro-body")).toBe("http://a.test:8000")
   })
 })
 
