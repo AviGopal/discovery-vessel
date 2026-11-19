@@ -17,6 +17,7 @@ import { postToPeer, normalizePeerKey, peerAuthorization } from "./peer-credenti
 import { admitsPeerInstance, endpointIsThisHost } from "./peer-instance"
 import { authMiddleware, getAuthContext, getAuthContextOptional } from "./middleware/auth"
 import { systemOrgId } from "./learned-description-writers"
+import { ownerVerdict, refusesOwner } from "./row-owner"
 import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
 import { selectPeerSet, recordPeerSetConsumption } from "./peer-set-source"
 import type {
@@ -629,6 +630,13 @@ export function createServer() {
       // refused and the old row kept. Guard machinery errors fail open -- only
       // an actually failed probe refuses. Register path only; serve path untouched.
       const prior = registry.get(request.vesselId)
+      const sysOrg = await systemOrgId()
+      const notOwner = ownerVerdict(prior, auth?.orgId, sysOrg)
+      if (notOwner) {
+        registry.recordWriter(request.vesselId, { ...callerInfo, kind: "refused_not_owner", detail: notOwner })
+        console.warn(`[discovery] /register refused for ${request.vesselId}: ${notOwner}`)
+        return c.json({ error: "registration refused: this vesselId is registered by another org", vesselId: request.vesselId }, 403)
+      }
       let refuseReason = ""
       if (prior && typeof prior.endpoint === "string") {
         try {
@@ -727,7 +735,7 @@ export function createServer() {
         // optional on input, normalized to defaults at write time.
         auth_token_source: request.auth_token_source,
         auth_delegation_mode: request.auth_delegation_mode
-      })
+      }, (row) => ownerVerdict(row, auth?.orgId, sysOrg) === null)
 
       // Attribution write (fail-open by contract: recordWriter never throws;
       // tolerates the row having been evicted by peer dedup inside register()).
@@ -753,6 +761,11 @@ export function createServer() {
 
       if (!request.vesselId) {
         return c.json({ error: "Missing vesselId" }, 400)
+      }
+      const notOwner = await refusesOwner(registry.get(request.vesselId), getAuthContextOptional(c)?.orgId)
+      if (notOwner) {
+        console.warn(`[discovery] /heartbeat refused for ${request.vesselId}: ${notOwner}`)
+        return c.json({ error: "heartbeat refused: this vesselId is registered by another org", vesselId: request.vesselId }, 403)
       }
 
       const success = registry.heartbeat(request.vesselId, request.metrics)

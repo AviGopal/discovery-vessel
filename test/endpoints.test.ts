@@ -169,7 +169,9 @@ describe("Discovery Vessel Endpoints", () => {
         vesselName: "V1",
         version: "1.0.0",
         endpoint: "http://localhost:8080",
-        shapes: ["file"]
+        shapes: ["file"],
+        // A row /register writes carries the registering key's org, and only that org (or the system identity) heartbeats it.
+        orgId: TEST_ORG_ID
       })
     })
 

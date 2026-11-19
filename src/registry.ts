@@ -57,7 +57,7 @@ export class VesselRegistry {
    * lastSeen wins and the staler row is evicted — recorded via a deregistration
    * metric and a vessel.expired bus event so the eviction is observable.
    */
-  private deduplicateByPeerIdentity(incomingId: string): void {
+  private deduplicateByPeerIdentity(incomingId: string, mayEvict: (row: VesselRegistration) => boolean = () => true): void {
     const incoming = this.vessels.get(incomingId)
     if (!incoming) return
 
@@ -98,6 +98,10 @@ export class VesselRegistry {
         : (existing.registeredAt ?? 0)
 
       const evictId = incomingLastSeen >= existingLastSeen ? existingId : incomingId
+      if (evictId === existingId && !mayEvict(existing)) {
+        console.warn(`[discovery] peer_dedup skipped for ${existingId}: the writer of ${incomingId} is not the owner of that row`)
+        continue
+      }
       this.vessels.delete(evictId)
       for (const ids of this.shapeIndex.values()) ids.delete(evictId)
       for (const ids of this.orgIndex.values()) ids.delete(evictId)
@@ -219,7 +223,9 @@ export class VesselRegistry {
             | "auth_delegation_mode"
             | "distribution_policy"
           >
-        >
+        >,
+    // Whether the writer of this row may remove another row peer dedup would evict: a row of another org is kept.
+    mayEvict: (row: VesselRegistration) => boolean = () => true,
   ): VesselRegistration {
     const startTime = Date.now()
     const existing = this.vessels.get(registration.vesselId)
@@ -303,7 +309,7 @@ export class VesselRegistry {
       is_reregistration: existing !== undefined,
     })
 
-    this.deduplicateByPeerIdentity(registration.vesselId)
+    this.deduplicateByPeerIdentity(registration.vesselId, mayEvict)
 
     return record
   }
