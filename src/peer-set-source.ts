@@ -314,13 +314,16 @@ async function loadSubstrateNodesPeers(hostDeps?: HostDeps): Promise<SubstrateNo
 /**
  * Select the peer set to fan out to, and record the source + set-used (the trace the grade reads).
  * `seed` is the env peer set (currentPeerEndpoints()) — the variant-0 body and the fail-open seed.
+ * `about`, when given, is what the caller says of the call being forwarded; it ends the per-call line.
  */
 export async function selectPeerSet(
   seed: string[],
   now: number = Date.now(),
   hostDeps?: HostDeps,
+  about?: string,
 ): Promise<PeerSetSelection> {
   const sel = await selectVariant(now)
+  const of = about ? ` ${about}` : ""
   let peers: string[]
   let source: PeerSetSource
   let why: string
@@ -330,7 +333,7 @@ export async function selectPeerSet(
     peers = seed
     source = "env"
     why = sel.why
-    console.log(`${LOG} variant=0 source=env (${why}) set=${fmt(peers)}`)
+    console.log(`${LOG} variant=0 source=env (${why}) set=${fmt(peers)}${of}`)
   } else {
     const nodes = await readSubstrateNodesPeers(hostDeps)
     if (nodes.kind === "unreadable") {
@@ -338,13 +341,13 @@ export async function selectPeerSet(
       peers = seed
       source = "seed_fallback"
       why = `substrateNodes unreadable: ${nodes.why}`
-      console.log(`${LOG} variant=1 source=seed_fallback (${why}; using env seed) set=${fmt(peers)}`)
+      console.log(`${LOG} variant=1 source=seed_fallback (${why}; using env seed) set=${fmt(peers)}${of}`)
     } else if (nodes.kind === "absent") {
       // FAIL OPEN: a readable pool with no substrateNodes record — absent is UNKNOWN, not "no peers".
       peers = seed
       source = "seed_fallback"
       why = "substrateNodes record absent"
-      console.log(`${LOG} variant=1 source=seed_fallback (${why}; using env seed) set=${fmt(peers)}`)
+      console.log(`${LOG} variant=1 source=seed_fallback (${why}; using env seed) set=${fmt(peers)}${of}`)
     } else {
       // A record was read; the set is it, self dropped (possibly empty when every entry was self).
       peers = nodes.endpoints
@@ -352,7 +355,7 @@ export async function selectPeerSet(
       why = sel.why
       droppedSelf = nodes.droppedSelf
       aliasesIgnored = nodes.aliasesIgnored
-      console.log(`${LOG} variant=1 source=substrateNodes (${why}) set=${fmt(peers)}`)
+      console.log(`${LOG} variant=1 source=substrateNodes (${why}) set=${fmt(peers)}${of}`)
     }
   }
   // SELECTION CHANGE → own execution trace (law 5: only on change; the first selection after boot counts).

@@ -392,3 +392,38 @@ describe("READ CACHE: ≤30 s TTL + single-flight per shape; one pool_read line 
     expect(poolReadLines("activityVariantMask").length).toBe(2)
   })
 })
+
+describe("the per-call line ends with what the caller says of the forwarded call", () => {
+  it("MUST-FAIL: each of the four sources' lines ends with `about`; with none given, each ends at its set as before", async () => {
+    const ABOUT = 'shape="conceptQuery" local=1'
+    const cases: Array<[string, () => void]> = [
+      ["source=env", () => { maskRows = []; nodeRows = nodesRecord() }],
+      ["source=substrateNodes", () => { maskRows = v1Mask(); nodeRows = nodesRecord() }],
+      ["substrateNodes record absent", () => { maskRows = v1Mask(); nodeRows = [] }],
+      ["substrateNodes unreadable", () => { maskRows = v1Mask(); nodeRows = [] }],
+    ]
+    for (const [mark, setUp] of cases) {
+      for (const about of [ABOUT, undefined]) {
+        __resetPeerSetSourceStateForTests()
+        logs = []
+        setUp()
+        const unreadable = mark === "substrateNodes unreadable"
+        const stub = globalThis.fetch
+        if (unreadable) {
+          globalThis.fetch = (async (_i: unknown, init?: RequestInit) => {
+            const bodyStr = String(init?.body ?? "")
+            if (bodyStr.includes('"activityVariantMask"')) return Response.json({ body: { impulses: maskRows } })
+            if (bodyStr.includes('"substrateNodes"')) return new Response("err", { status: 503 })
+            return Response.json({ ok: true })
+          }) as unknown as typeof fetch
+        }
+        await selectPeerSet(SEED, Date.now(), neverThisHost, about)
+        globalThis.fetch = stub
+        const line = logs.filter((l) => l.startsWith("[discovery-vessel:peer-set-source] variant=") && l.includes(mark))
+        expect([mark, line.length]).toEqual([mark, 1])
+        if (about) expect(line[0]).toEndWith(` ${ABOUT}`)
+        else expect(line[0]).toEndWith("]")
+      }
+    }
+  })
+})

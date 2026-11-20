@@ -277,10 +277,11 @@ async function forwardResolveToPeers(
   depth: number,
   authHeader: string | undefined,
   callerOrg?: string,
+  about?: string,
 ): Promise<{ body: unknown; status: number } | undefined> {
   if (depth >= MAX_PEER_DEPTH) return undefined
   // PEER-SET SOURCE (activity discovery-vessel:peer-set-source): see forwardToPeers.
-  const selection = await selectPeerSet(currentPeerEndpoints())
+  const selection = await selectPeerSet(currentPeerEndpoints(), Date.now(), undefined, about)
   const peers = selection.peers
   if (peers.length === 0) return undefined
   const once = isStateChangingShape(pointer.type)
@@ -441,7 +442,13 @@ export function createServer() {
             return c.json({ error: "caller_lacks_write_scope", shape: pointer.type, detail: "a state-changing shape with no local producer is forwarded only for a caller whose own scopes include write or admin" }, 403)
           }
           const depth = parseInt(c.req.header("X-Discovery-Depth") ?? "0", 10) || 0
-          const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"), auth?.orgId)
+          // The forward line says which shape went to a peer and why: this registry's healthy rows of it, of any org. A
+          // forward means none of them was the caller's to use, so local > 0 is a row here its org cannot use, and 0 is a
+          // shape nothing here serves. A count only: no org and no caller is named. The type is the caller's text, so it is
+          // quoted: a newline in it cannot start a line of its own.
+          const local = registry.findByShape(pointer.type).filter((v) => v.status === "healthy").length
+          const about = `shape=${JSON.stringify(String(pointer.type))} local=${local}`
+          const peerHit = await forwardResolveToPeers(pointer as DiscoveryPointer, depth, c.req.header("Authorization"), auth?.orgId, about)
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           // No producer here or on any peer: the call never reached one. Said as a field (unserved: the shape), so a
           // caller can tell this answer, discovery's own, from a producer's 404 about what it was asked.
