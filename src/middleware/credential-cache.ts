@@ -28,6 +28,15 @@
  *     serve nothing any more), a check sweeps the entry it consults when that
  *     entry is past grace, and past `maxEntries` evicts the oldest first
  *     (Map keeps insertion order; a refresh re-inserts).
+ *
+ * ONE QUESTION IN FLIGHT PER KEY. A check that must ask identity while an
+ * identical one (same map key: the audience and the full credential) is
+ * already asking awaits that answer instead of sending its own, so a burst of
+ * requests on one key after its TTL, or on an unknown key, is one identity
+ * call rather than one per request (federation's ingress validator keys its
+ * flights the same way). The flight is dropped when it settles, whatever the
+ * answer, so the next check after it asks again; what an answer decides
+ * (cache, evict, grace) is unchanged.
  */
 import { createHash } from "node:crypto"
 
@@ -103,6 +112,7 @@ export function makeCredentialValidator<T>(opts: CredentialValidatorOptions<T>):
   const clock = opts.clock ?? (() => Date.now())
   const timeoutMs = opts.timeoutMs ?? 10_000
   const entries = new Map<string, { ctx: T; at: number }>()
+  const inFlight = new Map<string, Promise<ValidationOutcome<T>>>()
 
   function remember(key: string, ctx: T, now: number): void {
     for (const [k, e] of entries) if (now - e.at >= graceMs) entries.delete(k)
@@ -130,8 +140,16 @@ export function makeCredentialValidator<T>(opts: CredentialValidatorOptions<T>):
     if (cached && now - cached.at < ttlMs) {
       return { ctx: cached.ctx, failure: "rejected", status: 0 }
     }
+    if (!base || !key) return { ctx: null, failure: "identity_unconfigured", status: 0 }
+    const asking = inFlight.get(key)
+    if (asking) return asking
+    const flight = ask(apiKey, base, key, cached, inGrace, now).finally(() => inFlight.delete(key))
+    inFlight.set(key, flight)
+    return flight
+  }
+
+  async function ask(apiKey: string, base: string, key: string, cached: { ctx: T; at: number } | undefined, inGrace: boolean, now: number): Promise<ValidationOutcome<T>> {
     try {
-      if (!base || !key) return { ctx: null, failure: "identity_unconfigured", status: 0 }
       const res = await fetch(`${base}/v1/auth/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
