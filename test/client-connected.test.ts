@@ -5,7 +5,7 @@
  * Bun's server does.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test"
 import { Hono } from "hono"
 import { authMiddleware, setClientObserver, setIdentityValidator } from "../src/middleware/auth"
 import { type Connected, clientObserver, isLoopback, writeConnectedVia } from "../src/client-connected"
@@ -85,6 +85,16 @@ describe("which requests are recorded", () => {
   })
 })
 
+describe("the observer itself", () => {
+  it("[GUARD] a validated principal with no key id, from outside, writes none", () => {
+    const calls: Connected[] = []
+    const seen = clientObserver(async (row) => { calls.push(row); return true })
+    seen(undefined, "10.0.0.5", "/resolve")
+    seen("", "10.0.0.5", "/resolve")
+    expect(calls).toEqual([])
+  })
+})
+
 describe("what loopback is", () => {
   it("[GUARD] the container's own addresses only", () => {
     for (const a of ["127.0.0.1", "127.255.255.254", "::1", "::ffff:127.0.0.1", "::FFFF:127.1.2.3"]) expect(isLoopback(a)).toBe(true)
@@ -122,6 +132,24 @@ describe("the row records is sent", () => {
     finally { s.stop(true) }
     expect(n).toBe(3)
     expect(await writeConnectedVia("http://127.0.0.1:9", () => "node-key", () => "d", async () => "nk")({ key_id: "k", path: "/" })).toBe(false)
+  })
+
+  it("[GUARD] why a write was not taken is said once per cause, however often it recurs", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      let key = ""
+      const write = writeConnectedVia("http://127.0.0.1:9", () => key, () => "d", async () => null)
+      expect(await write({ key_id: "k1", path: "/" })).toBe(false)
+      expect(await write({ key_id: "k2", path: "/" })).toBe(false)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain("no node key")
+      expect(String(warn.mock.calls[0][0])).not.toContain("k1")
+      key = "node-key"
+      expect(await write({ key_id: "k1", path: "/" })).toBe(false)
+      expect(await write({ key_id: "k2", path: "/" })).toBe(false)
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(String(warn.mock.calls[1][0])).toContain("not known")
+    } finally { warn.mockRestore() }
   })
 
   it("[GUARD] when the node key's id is not known, nothing is sent", async () => {
