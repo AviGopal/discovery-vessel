@@ -205,12 +205,15 @@ async function selectVariant(now: number): Promise<{ variant: 0 | 1; why: string
   return { variant: 0, why: `mask names unknown variant (${JSON.stringify(av)}): variant-0` }
 }
 
+/** The id this discovery is registered under, and writes records rows as. */
+export const selfVesselId = (): string => process.env.DISCOVERY_VESSEL_ID ?? "discovery-vessel"
+
 // ── SELF-DROP (variant 1): the node's own endpoint under every form it is listed as ──────────────────
 /** host:port self-forms this node knows itself by (normalized origins). Loopback and interface-level
  *  self-matching is left to endpointIsThisHost; the in-container alias and node identity are matched by
  *  host in matchesNodeIdentity. */
 function selfEndpointKeys(): Set<string> {
-  const self = registry.get(process.env.DISCOVERY_VESSEL_ID ?? "discovery-vessel")
+  const self = registry.get(selfVesselId())
   const candidates: Array<string | undefined> = [
     process.env.DISCOVERY_SELF_ENDPOINT,
     process.env.DISCOVERY_PUBLIC_URL,

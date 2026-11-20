@@ -7,6 +7,9 @@
 
 import { createServer, registry, getResolvableShapes } from "./src/index"
 import { keepSelfRegistered } from "./src/self"
+import { setClientObserver, validateApiKeyNow } from "./src/middleware/auth"
+import { clientObserver, writeConnectedVia } from "./src/client-connected"
+import { selfVesselId } from "./src/peer-set-source"
 
 const PORT = parseInt(process.env.DISCOVERY_PORT ?? process.env.PORT ?? "8080", 10)
 const HOST = process.env.DISCOVERY_HOST ?? "0.0.0.0"
@@ -26,13 +29,16 @@ async function selfRegister() {
   const endpoint = process.env.DISCOVERY_SELF_ENDPOINT ??
     `http://localhost:${PORT}`
 
-  keepSelfRegistered(process.env.DISCOVERY_VESSEL_ID ?? "discovery-vessel", endpoint)
+  keepSelfRegistered(selfVesselId(), endpoint)
 
   console.log(`[discovery-vessel] Self-registered with shapes: ${getResolvableShapes().join(", ")}`)
 }
 
 // Start server
 const app = createServer()
+// The first outside request of each key is recorded (src/client-connected.ts)
+setClientObserver(clientObserver(writeConnectedVia(`http://127.0.0.1:${PORT}`, () => process.env.METABOB_API_KEY ?? "", selfVesselId,
+  async (k) => (await validateApiKeyNow(k))?.keyId ?? null)))
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗

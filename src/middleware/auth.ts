@@ -376,5 +376,21 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
 
   // Store the resolved context so route handlers can retrieve it
   c.set(AUTH_KEY as never, authCtx)
+  observeClient?.(authCtx.keyId, socketAddress(c), normalisedPath)
   return next()
+}
+
+// WHO CONNECTED (client-connected.ts): each validated request is shown to the observer index.ts sets, with the
+// socket's own address, never a forwarded one. None set (a test, or before start) sees nothing.
+let observeClient: ((keyId: string | undefined, remote: string, path: string) => void) | null = null
+export function setClientObserver(fn: ((keyId: string | undefined, remote: string, path: string) => void) | null): void {
+  observeClient = fn
+}
+function socketAddress(c: Context): string {
+  try {
+    const server = c.env as unknown as { requestIP?: (r: Request) => { address?: string } | null } | undefined
+    return server?.requestIP?.(c.req.raw)?.address ?? ""
+  } catch {
+    return ""
+  }
 }
