@@ -18,6 +18,7 @@ const app = new Hono()
 app.use("*", authMiddleware)
 app.post("/resolve", (c) => c.json({ ok: true }))
 app.get("/health", (c) => c.json({ ok: true }))
+app.post("/register", (c) => c.json({ ok: true }))
 
 const from = (address: string | undefined) => ({ requestIP: () => (address === undefined ? null : { address }) })
 const call = (key: string | undefined, address: string | undefined, headers: Record<string, string> = {}, path = "/resolve") =>
@@ -75,6 +76,12 @@ describe("which requests are recorded", () => {
     const answers = await Promise.all(Array.from({ length: 50 }, () => call("key-one", "203.0.113.9")))
     expect(answers.every((r) => r.status === 200)).toBe(true)
     expect(o.calls).toHaveLength(1)
+  })
+
+  it("[GUARD] the row names the path the key's first request asked for, not one path for every request", async () => {
+    const o = observed()
+    expect((await call("key-two", "203.0.113.9", {}, "/register")).status).toBe(200)
+    expect(o.calls).toEqual([{ key_id: "k2", path: "/register" }])
   })
 
   it("[GUARD] each key writes its own row", async () => {
