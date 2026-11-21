@@ -9,8 +9,7 @@ const savedPath = process.env.DISCOVERY_LEARNED_DESCRIPTIONS_PATH
 process.env.DISCOVERY_LEARNED_DESCRIPTIONS_PATH = join(TMP, "learned.json")
 const { createServer, registry } = await import("../src/index")
 import { setIdentityValidator } from "../src/middleware/auth"
-import { type Served, servedAgain, setServedAgain } from "../src/served-again"
-import { writeObservedVia } from "../src/client-connected"
+import { type Served, servedAgain, servedAgainVia, setServedAgain } from "../src/served-again"
 import type { Hono } from "hono"
 
 const realFetch = globalThis.fetch
@@ -89,14 +88,17 @@ describe("a shape served again", () => {
 })
 
 describe("the row records is sent", () => {
-  it("[MUST-FAIL] a record_write of shape_served {served, vessel_id, node_key_id}, as this discovery (role detector), under the node key", async () => {
+  it("[MUST-FAIL] the observer the entry point runs sends a record_write of shape_served {served, vessel_id, node_key_id}, as this discovery (role detector), under the node key", async () => {
     let got: { url: string; auth: string | null; body: unknown } | undefined
-    const s = Bun.serve({ port: 0, fetch: async (req) => { got = { url: new URL(req.url).pathname, auth: req.headers.get("Authorization"), body: await req.json() }; return Response.json({ id: "r1", seq: 9 }) } })
+    let taken: () => void = () => {}
+    const done = new Promise<void>((r) => { taken = r })
+    const s = Bun.serve({ port: 0, fetch: async (req) => { got = { url: new URL(req.url).pathname, auth: req.headers.get("Authorization"), body: await req.json() }; taken(); return Response.json({ id: "r1", seq: 9 }) } })
     globalThis.fetch = realFetch
     try {
-      const write = writeObservedVia<Served>("shape_served", "the shape's next register", `http://127.0.0.1:${s.port}`, () => "node-key", () => "discovery-vessel",
-        async (k) => (k === "node-key" ? "nk1" : null))
-      expect(await write({ served: "tool_a", vessel_id: "v1" })).toBe(true)
+      const wired = servedAgainVia(`http://127.0.0.1:${s.port}`, () => "node-key", () => "discovery-vessel", async (k) => (k === "node-key" ? "nk1" : null))
+      wired.unserved("tool_a")
+      wired.registered("v1", ["tool_a"])
+      await done
       expect(got).toEqual({
         url: "/resolve",
         auth: "ApiKey node-key",

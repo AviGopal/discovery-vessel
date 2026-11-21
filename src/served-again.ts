@@ -11,6 +11,8 @@
  * A shape stays said until records has taken its row, so a write not taken is tried at the shape's next register; one
  * write per shape is in flight at a time.
  */
+import { writeObservedVia } from "./client-connected"
+
 export type Served = { served: string; vessel_id: string }
 export type ServedAgain = { unserved: (shape: string) => void; registered: (vesselId: string, shapes: string[]) => void }
 
@@ -33,6 +35,11 @@ export function servedAgain(write: (row: Served) => Promise<boolean>): ServedAga
       }
     },
   }
+}
+
+/** The observer as the entry point runs it: its rows written as shape_served through this discovery's own /resolve. */
+export function servedAgainVia(base: string, key: () => string, writer: () => string, keyIdOf: (k: string) => Promise<string | null>): ServedAgain {
+  return servedAgain(writeObservedVia<Served>("shape_served", "the shape's next register", base, key, writer, keyIdOf))
 }
 
 let observer: ServedAgain | null = null
