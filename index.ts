@@ -8,7 +8,8 @@
 import { createServer, registry, getResolvableShapes } from "./src/index"
 import { keepSelfRegistered } from "./src/self"
 import { setClientObserver, validateApiKeyNow } from "./src/middleware/auth"
-import { clientObserver, writeConnectedVia } from "./src/client-connected"
+import { clientObserver, writeConnectedVia, writeObservedVia } from "./src/client-connected"
+import { servedAgain, setServedAgain, type Served } from "./src/served-again"
 import { selfVesselId } from "./src/peer-set-source"
 
 const PORT = parseInt(process.env.DISCOVERY_PORT ?? process.env.PORT ?? "8080", 10)
@@ -39,6 +40,9 @@ const app = createServer()
 // The first outside request of each key is recorded (src/client-connected.ts)
 setClientObserver(clientObserver(writeConnectedVia(`http://127.0.0.1:${PORT}`, () => process.env.METABOB_API_KEY ?? "", selfVesselId,
   async (k) => (await validateApiKeyNow(k))?.keyId ?? null)))
+// A shape this discovery answered unserved is recorded when a vessel registers it again (src/served-again.ts)
+setServedAgain(servedAgain(writeObservedVia<Served>("shape_served", "the shape's next register", `http://127.0.0.1:${PORT}`,
+  () => process.env.METABOB_API_KEY ?? "", selfVesselId, async (k) => (await validateApiKeyNow(k))?.keyId ?? null)))
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗

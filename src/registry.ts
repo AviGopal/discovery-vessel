@@ -17,6 +17,7 @@ import {
 } from "./types"
 import { discoveryMetrics } from "./metrics"
 import { publishVesselEvent } from "./event-bus"
+import { registeredShapes } from "./served-again"
 import { LearnedDescriptions, type LearnedEntry } from "./learned-descriptions"
 
 /** Default TTL for vessel registrations (5 minutes) */
@@ -310,6 +311,8 @@ export class VesselRegistry {
     })
 
     this.deduplicateByPeerIdentity(registration.vesselId, mayEvict)
+    // a shape this discovery answered unserved has a producer again (served-again.ts)
+    registeredShapes(registration.vesselId, registration.shapes)
 
     return record
   }

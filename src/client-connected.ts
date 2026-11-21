@@ -53,9 +53,15 @@ export function clientObserver(write: WriteConnected): (keyId: string | undefine
  * Why a row was not taken is said once per cause, never with the key.
  */
 export function writeConnectedVia(base: string, key: () => string, writer: () => string, keyIdOf: (k: string) => Promise<string | null>): WriteConnected {
+  return writeObservedVia("client_connected", "that key's next request", base, key, writer, keyIdOf)
+}
+
+/** One of this discovery's observations written so, as a row of `shape`; `retry` says when a row not taken is tried again. */
+export function writeObservedVia<R extends Record<string, unknown>>(shape: string, retry: string, base: string, key: () => string, writer: () => string,
+  keyIdOf: (k: string) => Promise<string | null>): (row: R) => Promise<boolean> {
   const said = new Set<string>()
   const note = (why: string): false => {
-    if (!said.has(why)) { said.add(why); console.warn(`[discovery] client_connected not recorded: ${why}; tried again on that key's next request`) }
+    if (!said.has(why)) { said.add(why); console.warn(`[discovery] ${shape} not recorded: ${why}; tried again on ${retry}`) }
     return false
   }
   return async (row) => {
@@ -67,7 +73,7 @@ export function writeConnectedVia(base: string, key: () => string, writer: () =>
       const res = await fetch(new URL("/resolve", base).href, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `ApiKey ${k}` },
-        body: JSON.stringify({ pointer: { type: "record_write", row: { shape: "client_connected", ...row, node_key_id: nodeKeyId, input_refs: [] }, writer: writer(), role: "detector" } }),
+        body: JSON.stringify({ pointer: { type: "record_write", row: { shape, ...row, node_key_id: nodeKeyId, input_refs: [] }, writer: writer(), role: "detector" } }),
         signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) return note(`records answered ${res.status}`)

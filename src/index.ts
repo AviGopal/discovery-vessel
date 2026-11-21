@@ -20,6 +20,7 @@ import { systemOrgId } from "./learned-description-writers"
 import { ownerVerdict, refusesOwner } from "./row-owner"
 import { pickHeldShapeProducer, routingRecord, sanitizeShapePolicies } from "./held-shape-routing"
 import { selectPeerSet, recordPeerSetConsumption } from "./peer-set-source"
+import { saidUnserved } from "./served-again"
 import type {
   DiscoveryPointer,
   ResolveRequest,
@@ -452,6 +453,7 @@ export function createServer() {
           if (peerHit) return c.json(peerHit.body as Record<string, unknown>, peerHit.status as 200)
           // No producer here or on any peer: the call never reached one. Said as a field (unserved: the shape), so a
           // caller can tell this answer, discovery's own, from a producer's 404 about what it was asked.
+          saidUnserved(String(pointer.type))
           return c.json({ error: "Not found", shape: pointer.type, unserved: pointer.type }, 404)
         }
         // Prefer the normalized first-class distribution_policy (registry fills it
