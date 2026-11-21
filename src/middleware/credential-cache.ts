@@ -20,7 +20,8 @@
  *   - REVOCATION LAG IS AT MOST THE TTL: within it no identity call is made, so
  *     identity has no way to say a key was revoked. The first check after the
  *     TTL asks identity, and a refusal then evicts.
- *   - GRACE: when identity is slow, unreachable or 5xx-ing, a key whose
+ *   - GRACE: when identity is slow, unreachable, 5xx-ing, or answering 429
+ *     or 408 (rate limit, timeout: no verdict on the key), a key whose
  *     positive entry is younger than `graceMs` is served from it. Serving from
  *     grace never refreshes the entry, so a sustained fault cannot keep a key
  *     alive past the grace window.
@@ -39,6 +40,12 @@
  * (cache, evict, grace) is unchanged.
  */
 import { createHash } from "node:crypto"
+
+/**
+ * Whether identity's non-2xx answer is no verdict on the key: it is faulting (5xx), limiting its rate (429) or timed
+ * out (408). Such an answer is retried, never a refusal, and a known key is served from grace through it.
+ */
+export const identityUndecided = (status: number): boolean => status >= 500 || status === 429 || status === 408
 
 /** Why a check failed. */
 export type ValidationFailure =
@@ -165,14 +172,13 @@ export function makeCredentialValidator<T>(opts: CredentialValidatorOptions<T>):
           entries.delete(key)
           return { ctx: null, failure: "rejected", status: res.status }
         }
-        // A 5xx is identity FAULTING; a known key is served from grace.
-        if (res.status >= 500) {
+        // A 5xx, 429 or 408 is identity not deciding; a known key is served from grace, and the entry is kept.
+        if (identityUndecided(res.status)) {
           if (inGrace) return { ctx: cached!.ctx, failure: "identity_http_error", status: res.status }
           const retryAfter = res.headers.get("Retry-After") ?? undefined
           return { ctx: null, failure: "identity_http_error", status: res.status, retryAfter }
         }
-        // Any other 4xx is identity DECIDING: evict. That includes 429 and 408,
-        // as on the parent: a rate limit or timeout from identity refuses.
+        // Any other 4xx is identity DECIDING: evict.
         entries.delete(key)
         return { ctx: null, failure: "identity_http_error", status: res.status }
       }

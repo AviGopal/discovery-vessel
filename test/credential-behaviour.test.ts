@@ -14,8 +14,9 @@
  *     still is (200).
  * PINS (green on the parent by design; they hold the parent's behaviour in place):
  *   - (iv) a 401/403 from identity, on the first call after the TTL, is a 401 and leaves nothing for grace.
- *   - a 429 or 408 from identity, for a key cached 61 s ago, is a 401 and leaves nothing for grace: identity's
- *     rate limit and timeout still refuse the key, by the owner's ruling.
+ * MUST-FAIL on the parent (which refused them, 401, and evicted): a 429 or 408 from identity, for a key cached 61 s
+ * ago, is served from grace, and grace still serves it after: a rate limit or timeout is no verdict on the key, by
+ * the "Try again shortly" ruling.
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test"
@@ -136,22 +137,18 @@ describe("through the middleware: the cache", () => {
   }
 
   for (const s of [429, 408]) {
-    it(`PIN (green on the parent by design): a ${s} for a key cached 61 s ago is a 401, and leaves nothing for grace`, async () => {
+    it(`[MUST-FAIL] a ${s} for a key cached 61 s ago is served from grace, and grace still serves it after`, async () => {
       const key = freshKey()
       identity[ID_A] = ok
       expect((await attempt(key)).status).toBe(200)
 
       at(61_000)
       identity[ID_A] = status(s)
-      const refused = await attempt(key)
-      expect(refused.status).toBe(401)
-      expect(await reason(refused)).toBe("identity_http_error")
+      expect((await attempt(key)).status).toBe(200)
 
-      identity[ID_A] = status(500) // the entry is gone: grace serves nothing
+      identity[ID_A] = status(500) // the entry is kept: grace serves it
       at(62_000)
-      const after = await attempt(key)
-      expect(after.status).not.toBe(200)
-      expect(await reason(after)).toBe("identity_http_error")
+      expect((await attempt(key)).status).toBe(200)
     })
   }
 })

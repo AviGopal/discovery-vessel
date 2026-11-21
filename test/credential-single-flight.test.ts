@@ -7,7 +7,7 @@
  * moved with setSystemTime (the cache ages by Date.now()).
  *
  * MUST-FAIL on the parent (one identity call per request there): a burst on an unknown key; a burst on a key past
- * its TTL; a burst answered 429, which stays a refusal (401) for every request of it.
+ * its TTL; a burst answered 429, which is no verdict on the key: every request of it is a retryable 503.
  * GUARDS (green on the parent): two keys at once are two calls, each with its own answer; a request identity never
  * answers is a 503, and the next request after it settles asks again.
  */
@@ -103,12 +103,12 @@ describe("one identity call in flight per key", () => {
     expect(new Set(got)).toEqual(new Set([200]))
   })
 
-  it("[MUST-FAIL] a burst identity answers 429 is one call, and every request of it is still refused (401)", async () => {
+  it("[MUST-FAIL] a burst identity answers 429 is one call, and every request of it is a retryable 503", async () => {
     const k = freshKey()
     answer[k] = status(429)
     const got = await burst(Array(50).fill(k))
     expect(calls.length).toBe(1)
-    expect(new Set(got)).toEqual(new Set([401]))
+    expect(new Set(got)).toEqual(new Set([503]))
   })
 
   it("[GUARD] two keys at once are two calls, each answered for itself", async () => {

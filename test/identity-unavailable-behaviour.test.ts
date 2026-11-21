@@ -8,8 +8,9 @@
  *   - a 5xx from identity on an unknown key: 503 IDENTITY_UNAVAILABLE, with identity's Retry-After passed on;
  *   - identity unreachable on an unknown key: 503 IDENTITY_UNAVAILABLE;
  *   - identity URL unset: 500 IDENTITY_UNCONFIGURED, with no request made.
- * PIN (green on the parent by design): a 429 from identity on an unknown key is a 401: identity's rate limit still
- * refuses the key, by the owner's ruling.
+ * MUST-FAIL on the parent (which answered them 401): a 429 or 408 from identity on an unknown key is 503
+ * IDENTITY_UNAVAILABLE, with identity's Retry-After passed on: a rate limit or a timeout is no verdict on the key, by
+ * the "Try again shortly" ruling.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
@@ -83,10 +84,15 @@ describe("through the middleware: refused is 401, unavailable is 503, unconfigur
     expect(calls).toBe(0)
   })
 
-  it("PIN (green on the parent by design): a 429 on an unknown key is a 401", async () => {
-    handler = () => new Response("{}", { status: 429, headers: { "Retry-After": "23" } })
-    const res = await attempt()
-    expect(res.status).toBe(401)
-    expect((await errorOf(res)).reason).toBe("identity_http_error")
-  })
+  for (const s of [429, 408]) {
+    it(`[MUST-FAIL] a ${s} on an unknown key is 503 IDENTITY_UNAVAILABLE, with identity's Retry-After`, async () => {
+      handler = () => new Response("{}", { status: s, headers: { "Retry-After": "23" } })
+      const res = await attempt()
+      expect(res.status).toBe(503)
+      expect(res.headers.get("Retry-After")).toBe("23")
+      const e = await errorOf(res)
+      expect(e.code).toBe("IDENTITY_UNAVAILABLE")
+      expect(e.reason).toBe("identity_http_error")
+    })
+  }
 })

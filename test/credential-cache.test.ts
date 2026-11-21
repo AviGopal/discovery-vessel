@@ -132,10 +132,10 @@ describe("a positive answer is reused for the TTL, and only that long", () => {
 })
 
 describe("a refusal evicts at once", () => {
-  // Identity's 429 (rate limit) and 408 (timeout) are refusals here, as on the parent: the USER's verdict was to
-  // keep refusing. Pinned so a change to that is a visible decision, not a drift.
+  // Identity's 429 (rate limit) and 408 (timeout) are no verdict on the key, by the "Try again shortly" ruling: a
+  // known key is served from grace through them, and its entry is kept.
   for (const s of [429, 408]) {
-    it(`PIN (green on the parent by design): a ${s} for a key cached 61 s ago is a 401, and the entry is evicted`, async () => {
+    it(`[MUST-FAIL] a ${s} for a key cached 61 s ago is served from grace, and the entry is kept`, async () => {
       const key = freshKey()
       identity[ID_A] = ok
       expect((await attempt(key)).status).toBe(200)
@@ -143,10 +143,8 @@ describe("a refusal evicts at once", () => {
 
       at(61_000) // past the TTL, inside grace
       identity[ID_A] = status(s)
-      const res = await attempt(key)
-      expect(res.status).toBe(401)
-      expect(await reason(res)).toBe("identity_http_error")
-      expect(__credentialCacheSizeForTests()).toBe(0)
+      expect((await attempt(key)).status).toBe(200)
+      expect(__credentialCacheSizeForTests()).toBe(1)
     })
   }
 

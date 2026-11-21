@@ -8,6 +8,7 @@
 import type { Context, Next } from "hono"
 import {
   DEFAULT_CREDENTIAL_TTL_MS,
+  identityUndecided,
   makeCredentialValidator,
   type ValidationFailure,
   type ValidationOutcome
@@ -235,12 +236,12 @@ export function getAuthContextOptional(c: Context): AuthContext | undefined {
 
 /**
  * Whether a failed validation is identity failing to decide (503) rather than
- * identity refusing the key (401): a 5xx or no answer. A 401/403, a 200 saying
- * not authenticated, and any other 4xx (429 and 408 included) stay refusals.
+ * identity refusing the key (401): a 5xx, a 429 or 408, or no answer. A
+ * 401/403, a 200 saying not authenticated, and any other 4xx stay refusals.
  */
 function identityCouldNotDecide(outcome: ValidationOutcome<AuthContext>): boolean {
   if (outcome.failure === "identity_unreachable") return true
-  return outcome.failure === "identity_http_error" && outcome.status >= 500
+  return outcome.failure === "identity_http_error" && identityUndecided(outcome.status)
 }
 
 /**

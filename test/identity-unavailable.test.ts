@@ -98,11 +98,11 @@ describe("identity unable to decide, with no grace, is 503: refused is 401, unav
   })
 
   for (const s of [429, 408]) {
-    it(`PIN (green on the parent by design): a ${s} on an unknown key is a 401, not a 503`, async () => {
+    it(`[MUST-FAIL] a ${s} on an unknown key is a 503 with identity's Retry-After: no verdict on the key ("Try again shortly")`, async () => {
       handler = status(s, { "Retry-After": "9" })
       const res = await attempt(freshKey())
-      expect(res.status).toBe(401)
-      expect(res.headers.get("Retry-After")).toBeNull()
+      expect(res.status).toBe(503)
+      expect(res.headers.get("Retry-After")).toBe("9")
       expect((await errorOf(res)).reason).toBe("identity_http_error")
     })
   }
