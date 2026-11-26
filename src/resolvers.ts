@@ -28,7 +28,8 @@ import type {
   ShapeProducersResult,
   VesselListPointer,
   VesselListResult,
-  VesselRegistration
+  VesselRegistration,
+  ShapeConsume
 } from "./types"
 
 /**
@@ -412,6 +413,38 @@ export function sanitizeShapeChanges(raw: unknown, shapes: unknown): Record<stri
   return Object.keys(out).length ? out : undefined
 }
 
+/**
+ * A registration's shape_consumes as discovery keeps them: only for shapes the vessel advertises, each a list of
+ * { shape, binds } with a plain shape name and binds a map of plain field names to plain field names (at most
+ * CONSUMES_MAX entries, one per consumed shape, the first kept; at most BINDS_MAX binds; an entry with binds that are not
+ * such a map is dropped, a missing binds is none), at most WRITES_MAX shapes. Undefined when nothing is left.
+ */
+export const CONSUMES_MAX = 8
+export const BINDS_MAX = 8
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+export function sanitizeShapeConsumes(raw: unknown, shapes: unknown): Record<string, ShapeConsume[]> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Array.isArray(shapes)) return undefined
+  const advertised = new Set(shapes.map(String))
+  const out: Record<string, ShapeConsume[]> = {}
+  for (const [call, consumed] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(out).length >= WRITES_MAX) break
+    if (!advertised.has(call) || !Array.isArray(consumed)) continue
+    const kept: ShapeConsume[] = []
+    for (const e of consumed) {
+      if (kept.length >= CONSUMES_MAX) break
+      if (!e || typeof e !== "object" || Array.isArray(e)) continue
+      const { shape, binds } = e as { shape?: unknown; binds?: unknown }
+      if (typeof shape !== "string" || !SHAPE_NAME.test(shape) || kept.some((k) => k.shape === shape)) continue
+      if (binds !== undefined && (!binds || typeof binds !== "object" || Array.isArray(binds))) continue
+      const pairs = Object.entries((binds ?? {}) as Record<string, unknown>)
+      if (pairs.length > BINDS_MAX || pairs.some(([f, from]) => !FIELD_NAME.test(f) || typeof from !== "string" || !FIELD_NAME.test(from))) continue
+      kept.push({ shape, binds: Object.fromEntries(pairs) as Record<string, string> })
+    }
+    if (kept.length > 0) out[call] = kept
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 /** A registration's writes: shape names it does not also serve, at most WRITES_MAX of them. */
 export const WRITES_MAX = 64
 export function sanitizeWrites(raw: unknown, shapes: unknown): string[] | undefined {
@@ -437,11 +470,13 @@ export async function resolveShapeDescriptions(
   const inputs = registry.getShapeInputs(scope)
   const answers = registry.getShapeAnswers(scope)
   const changes = registry.getShapeChanges(scope)
+  const consumes = registry.getShapeConsumes(scope)
   const wanted = Array.isArray(pointer.shapes) ? new Set(pointer.shapes.map(String)) : null
   const shape_descriptions: Record<string, string> = {}
   const shape_inputs: Record<string, Record<string, unknown>> = {}
   const shape_answers: Record<string, string> = {}
   const shape_changes: Record<string, string[]> = {}
+  const shape_consumes: Record<string, ShapeConsume[]> = {}
   // Every shape that is described OR has declared inputs: a declaration makes a shape fillable whether or not anyone
   // wrote prose for it, so it is offered with an empty description rather than dropped.
   for (const shape of [...new Set([...Object.keys(all), ...Object.keys(inputs)])].sort((a, b) => a.localeCompare(b))) {
@@ -453,6 +488,7 @@ export async function resolveShapeDescriptions(
     if (inputs[shape]) shape_inputs[shape] = inputs[shape]
     if (answers[shape]) shape_answers[shape] = answers[shape]
     if (changes[shape]) shape_changes[shape] = changes[shape]
+    if (consumes[shape]) shape_consumes[shape] = consumes[shape]
   }
   // Written-not-served shapes: data a reader meets in rows, never a call, so `declared` (which narrows what can be
   // called) does not filter them.
@@ -462,7 +498,7 @@ export async function resolveShapeDescriptions(
     if (ADDRESS.test(text)) continue
     data_shapes[shape] = text
   }
-  return { shape_descriptions, shape_inputs, shape_answers, shape_changes, data_shapes }
+  return { shape_descriptions, shape_inputs, shape_answers, shape_changes, shape_consumes, data_shapes }
 }
 
 // THE SHAPES A PRODUCER CALLS TO REASON ABOUT THE FLEET. vesselList and shapeProducers say what runs and what serves a

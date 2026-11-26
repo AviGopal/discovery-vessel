@@ -6,7 +6,7 @@
  */
 
 import { createHash, createPublicKey, verify } from "node:crypto"
-import type { VesselRegistration, DistributionPolicy } from "./types"
+import type { VesselRegistration, DistributionPolicy, ShapeConsume } from "./types"
 import {
   DEFAULT_RESOLVE_ENDPOINT,
   DEFAULT_RESOLVE_REQUEST_FORMAT,
@@ -587,6 +587,21 @@ export class VesselRegistry {
       const advertised = new Set(vessel.shapes)
       for (const [shape, changed] of Object.entries(vessel.shape_changes ?? {})) {
         if (advertised.has(shape) && !out[shape]) out[shape] = [...changed]
+      }
+    }
+    return out
+  }
+
+  /** Each served shape's declared consumes, from the live vessels the orgs can reach (scoped like getShapeAnswers). */
+  getShapeConsumes(options?: { orgIds?: string[] }): Record<string, ShapeConsume[]> {
+    const orgIds = options?.orgIds
+    const out: Record<string, ShapeConsume[]> = {}
+    for (const vessel of this.vessels.values()) {
+      if (this.isExpired(vessel)) continue
+      if (orgIds?.length && !(vessel.systemVessel === true || (vessel.orgId != null && orgIds.includes(vessel.orgId)))) continue
+      const advertised = new Set(vessel.shapes)
+      for (const [shape, consumed] of Object.entries(vessel.shape_consumes ?? {})) {
+        if (advertised.has(shape) && !out[shape]) out[shape] = consumed.map((e) => ({ shape: e.shape, binds: { ...e.binds } }))
       }
     }
     return out

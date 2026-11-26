@@ -177,6 +177,14 @@ export interface VesselRegistration {
   shape_changes?: Record<string, string[]>
 
   /**
+   * OPTIONAL per-shape consumes: the rows a call of the shape takes, declared by the vessel that owns it, each a shape
+   * and the pointer fields bound from that row's fields (git_commit takes a fileEditResult, its cwd bound from the row's
+   * cwd). Beside shape_answers (what a call makes) it is the other half of the edge a reader chains over: which call takes
+   * what the last call made, as data, not prose. Kept only for shapes in `shapes` (sanitizeShapeConsumes).
+   */
+  shape_consumes?: Record<string, ShapeConsume[]>
+
+  /**
    * OPTIONAL shapes this vessel WRITES as rows but does not serve (never resolvable through it), each described in
    * shape_descriptions: the walk's hop, selection and failure rows, for instance. They never enter `shapes`, so they
    * reach no capability lookup, routing or callable list; readers get their descriptions as data_shapes in the
@@ -507,6 +515,12 @@ export interface VesselRegistryResult {
   totalCount: number
 }
 
+/** One row a call takes: its shape, and each pointer field of the call bound from a field of that row. */
+export interface ShapeConsume {
+  shape: string
+  binds: Record<string, string>
+}
+
 export interface ShapeDescriptionsResult {
   shape_descriptions: Record<string, string>
   /** Each described shape's declared input schema, where its producer declared one. */
@@ -515,6 +529,8 @@ export interface ShapeDescriptionsResult {
   shape_answers: Record<string, string>
   /** Each described shape's declared changes (the shapes a call of it alters), where its producer declared them. */
   shape_changes: Record<string, string[]>
+  /** Each described shape's declared consumes (the rows a call of it takes), where its producer declared them. */
+  shape_consumes: Record<string, ShapeConsume[]>
   /** What the rows of shapes vessels write but do not serve are (not callable; never filtered by `declared`). */
   data_shapes: Record<string, string>
 }
@@ -585,6 +601,8 @@ export interface RegisterRequest {
   shape_answers?: unknown
   /** OPTIONAL per-shape changes (see VesselRegistration.shape_changes). */
   shape_changes?: unknown
+  /** OPTIONAL per-shape consumes (see VesselRegistration.shape_consumes). */
+  shape_consumes?: unknown
   /** OPTIONAL shapes written but not served (see VesselRegistration.writes). */
   writes?: unknown
   protocol?: string
