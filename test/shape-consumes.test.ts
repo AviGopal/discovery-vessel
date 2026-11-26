@@ -48,7 +48,8 @@ describe("sanitizeShapeConsumes", () => {
       c: [
         { shape: "a b", binds: {} }, { shape: "http://x" }, "editResult", null, [], { binds: { cwd: "cwd" } },
         { shape: "badKey", binds: { "a.b": "cwd" } }, { shape: "badValue", binds: { cwd: 3 } }, { shape: "dotted", binds: { cwd: "a.b" } },
-        { shape: "listBinds", binds: ["cwd"] }, { shape: "nullBinds", binds: null },
+        { shape: "listBinds", binds: ["cwd"] }, { shape: "nullBinds", binds: null }, { shape: "numBinds", binds: 5 },
+        { shape: "trueBinds", binds: true }, { shape: "stringBinds", binds: "cwd" },
         { shape: "bare" }, { shape: "bare", binds: { cwd: "cwd" } },
       ],
       only_bad: [{ shape: "x y" }], not_a_list: { shape: "editResult" },
@@ -120,6 +121,11 @@ describe("which vessels' declared consumes the registry serves", () => {
     const a = registry.getShapeConsumes({ orgIds: ["org-scn-a"] })
     expect([a.scn_org_b, a.scn_system]).toEqual([undefined, X])
     expect(registry.getShapeConsumes({ orgIds: ["org-scn-b"] }).scn_org_b).toEqual(X)
+  })
+  it("[MUST-FAIL] a vessel registered directly is not served consumes for a shape it does not advertise", () => {
+    reg("v-scn-unadvertised", "scn_mine", X, { systemVessel: true, shape_consumes: { scn_mine: X, scn_not_mine: X } })
+    const served = registry.getShapeConsumes()
+    expect([served.scn_mine, served.scn_not_mine]).toEqual([X, undefined])
   })
   it("[MUST-FAIL] when two vessels declare one shape, the first registered is served", () => {
     reg("v-scn-first", "scn_dup", [{ shape: "scnFirst", binds: {} }], { systemVessel: true })
